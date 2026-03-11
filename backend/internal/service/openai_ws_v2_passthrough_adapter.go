@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -18,7 +19,8 @@ import (
 )
 
 type openAIWSClientFrameConn struct {
-	conn *coderws.Conn
+	conn     *coderws.Conn
+	recorder *openAIWSTurnPayloadRecorder
 }
 
 const openaiWSV2PassthroughModeFields = "ws_mode=passthrough ws_router=v2"
@@ -32,7 +34,11 @@ func (c *openAIWSClientFrameConn) ReadFrame(ctx context.Context) (coderws.Messag
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return c.conn.Read(ctx)
+	msgType, payload, err := c.conn.Read(ctx)
+	if err == nil && c.recorder != nil && (msgType == coderws.MessageText || msgType == coderws.MessageBinary) {
+		c.recorder.RecordRequest(payload)
+	}
+	return msgType, payload, err
 }
 
 func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderws.MessageType, payload []byte) error {
@@ -42,7 +48,13 @@ func (c *openAIWSClientFrameConn) WriteFrame(ctx context.Context, msgType coderw
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return c.conn.Write(ctx, msgType, payload)
+	if err := c.conn.Write(ctx, msgType, payload); err != nil {
+		return err
+	}
+	if c.recorder != nil && (msgType == coderws.MessageText || msgType == coderws.MessageBinary) {
+		c.recorder.RecordResponse(payload)
+	}
+	return nil
 }
 
 func (c *openAIWSClientFrameConn) Close() error {
@@ -52,6 +64,80 @@ func (c *openAIWSClientFrameConn) Close() error {
 	_ = c.conn.Close(coderws.StatusNormalClosure, "")
 	_ = c.conn.CloseNow()
 	return nil
+}
+
+type openAIWSTurnPayloadRecorder struct {
+	mu                sync.Mutex
+	requestMaxBytes   int64
+	responseMaxBytes  int64
+	responseMaxFrames int
+	pendingRequests   []UsageCapturedPayload
+	currentResponses  *UsageCapturedFrameRecorder
+}
+
+func newOpenAIWSTurnPayloadRecorder(firstRequest []byte, limits UsageDetailCaptureConfig) *openAIWSTurnPayloadRecorder {
+	r := &openAIWSTurnPayloadRecorder{
+		requestMaxBytes:   limits.MaxRequestBytes,
+		responseMaxBytes:  limits.MaxResponseBytes,
+		responseMaxFrames: limits.MaxWSResponseFrames,
+		currentResponses:  NewUsageCapturedFrameRecorder(limits.MaxResponseBytes, limits.MaxWSResponseFrames),
+	}
+	if firstRequest != nil {
+		r.pendingRequests = append(r.pendingRequests, CaptureUsagePayload(firstRequest, limits.MaxRequestBytes))
+	}
+	return r
+}
+
+func (r *openAIWSTurnPayloadRecorder) RecordRequest(payload []byte) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pendingRequests = append(r.pendingRequests, CaptureUsagePayload(payload, r.requestMaxBytes))
+}
+
+func (r *openAIWSTurnPayloadRecorder) RecordResponse(payload []byte) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.currentResponses == nil {
+		r.currentResponses = NewUsageCapturedFrameRecorder(r.responseMaxBytes, r.responseMaxFrames)
+	}
+	r.currentResponses.Add(payload)
+}
+
+func (r *openAIWSTurnPayloadRecorder) TakeTurn() (UsageCapturedPayload, UsageCapturedFrames) {
+	if r == nil {
+		return UsageCapturedPayload{Complete: true}, UsageCapturedFrames{Complete: true}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	request := UsageCapturedPayload{Complete: true}
+	if len(r.pendingRequests) > 0 {
+		request = r.pendingRequests[0]
+		r.pendingRequests = r.pendingRequests[1:]
+	}
+	response := UsageCapturedFrames{Complete: true}
+	if r.currentResponses != nil {
+		response = r.currentResponses.Snapshot()
+	}
+	r.currentResponses = NewUsageCapturedFrameRecorder(r.responseMaxBytes, r.responseMaxFrames)
+	return request, response
+}
+
+func cloneOpenAIWSBinaryFrames(items [][]byte) [][]byte {
+	if len(items) == 0 {
+		return nil
+	}
+	cloned := make([][]byte, 0, len(items))
+	for idx := range items {
+		cloned = append(cloned, cloneOpenAIWSPayloadBytes(items[idx]))
+	}
+	return cloned
 }
 
 func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
@@ -152,9 +238,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 
 	completedTurns := atomic.Int32{}
+	payloadRecorder := newOpenAIWSTurnPayloadRecorder(firstClientMessage, s.usageDetailCapture)
 	relayResult, relayExit := openaiwsv2.RunEntry(openaiwsv2.EntryInput{
 		Ctx:                ctx,
-		ClientConn:         &openAIWSClientFrameConn{conn: clientConn},
+		ClientConn:         &openAIWSClientFrameConn{conn: clientConn, recorder: payloadRecorder},
 		UpstreamConn:       upstreamFrameConn,
 		FirstClientMessage: firstClientMessage,
 		Options: openaiwsv2.RelayOptions{
@@ -170,6 +257,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			},
 			OnTurnComplete: func(turn openaiwsv2.RelayTurnResult) {
 				turnNo := int(completedTurns.Add(1))
+				requestPayload, responsePayload := payloadRecorder.TakeTurn()
 				turnResult := &OpenAIForwardResult{
 					RequestID: turn.RequestID,
 					Usage: OpenAIUsage{
@@ -178,13 +266,21 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
 						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 					},
-					Model:           turn.RequestModel,
-					ServiceTier:     requestServiceTier,
-					Stream:          true,
-					OpenAIWSMode:    true,
-					ResponseHeaders: cloneHeader(handshakeHeaders),
-					Duration:        turn.Duration,
-					FirstTokenMs:    turn.FirstTokenMs,
+					Model:               turn.RequestModel,
+					ServiceTier:         requestServiceTier,
+					Stream:              true,
+					OpenAIWSMode:        true,
+					RequestBody:         requestPayload.Body,
+					RequestBytes:        requestPayload.Bytes,
+					RequestComplete:     requestPayload.Complete,
+					RequestContentType:  "application/json",
+					ResponseFrames:      responsePayload.Frames,
+					ResponseBytes:       responsePayload.Bytes,
+					ResponseContentType: "application/json",
+					ResponseComplete:    turn.Complete && responsePayload.Complete,
+					ResponseHeaders:     cloneHeader(handshakeHeaders),
+					Duration:            turn.Duration,
+					FirstTokenMs:        turn.FirstTokenMs,
 				}
 				logOpenAIWSV2Passthrough(
 					"relay_turn_completed account_id=%d turn=%d request_id=%s terminal_event=%s duration_ms=%d first_token_ms=%d input_tokens=%d output_tokens=%d cache_read_tokens=%d",
@@ -226,13 +322,18 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			CacheCreationInputTokens: relayResult.Usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     relayResult.Usage.CacheReadInputTokens,
 		},
-		Model:           relayResult.RequestModel,
-		ServiceTier:     requestServiceTier,
-		Stream:          true,
-		OpenAIWSMode:    true,
-		ResponseHeaders: cloneHeader(handshakeHeaders),
-		Duration:        relayResult.Duration,
-		FirstTokenMs:    relayResult.FirstTokenMs,
+		Model:               relayResult.RequestModel,
+		ServiceTier:         requestServiceTier,
+		Stream:              true,
+		OpenAIWSMode:        true,
+		RequestBody:         CaptureUsagePayload(firstClientMessage, s.usageDetailCapture.MaxRequestBytes).Body,
+		RequestBytes:        int64(len(firstClientMessage)),
+		RequestComplete:     int64(len(firstClientMessage)) <= s.usageDetailCapture.MaxRequestBytes,
+		RequestContentType:  "application/json",
+		ResponseContentType: "application/json",
+		ResponseHeaders:     cloneHeader(handshakeHeaders),
+		Duration:            relayResult.Duration,
+		FirstTokenMs:        relayResult.FirstTokenMs,
 	}
 
 	turnCount := int(completedTurns.Load())

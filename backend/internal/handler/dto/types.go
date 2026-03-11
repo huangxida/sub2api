@@ -380,11 +380,35 @@ type AdminUsageLog struct {
 	// AccountRateMultiplier 账号计费倍率快照（nil 表示按 1.0 处理）
 	AccountRateMultiplier *float64 `json:"account_rate_multiplier"`
 
+	// HasDetail 是否已采集原始请求/响应详情
+	HasDetail bool `json:"has_detail"`
+
 	// IPAddress 用户请求 IP（仅管理员可见）
 	IPAddress *string `json:"ip_address,omitempty"`
 
 	// Account 最小账号信息（避免泄露敏感字段）
 	Account *AccountSummary `json:"account,omitempty"`
+}
+
+type AdminUsageDetailResponse struct {
+	UsageLogID  int64               `json:"usage_log_id"`
+	HasDetail   bool                `json:"has_detail"`
+	RequestID   string              `json:"request_id"`
+	Model       string              `json:"model"`
+	RequestType string              `json:"request_type"`
+	CreatedAt   time.Time           `json:"created_at"`
+	Request     *UsageDetailPayload `json:"request,omitempty"`
+	Response    *UsageDetailPayload `json:"response,omitempty"`
+}
+
+type UsageDetailPayload struct {
+	Kind        string   `json:"kind"`
+	ContentType *string  `json:"content_type,omitempty"`
+	SizeBytes   int64    `json:"size_bytes"`
+	IsJSON      bool     `json:"is_json"`
+	Complete    *bool    `json:"complete,omitempty"`
+	Body        *string  `json:"body,omitempty"`
+	Frames      []string `json:"frames,omitempty"`
 }
 
 type UsageCleanupFilters struct {

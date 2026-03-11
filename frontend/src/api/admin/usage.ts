@@ -4,7 +4,7 @@
  */
 
 import { apiClient } from '../client'
-import type { AdminUsageLog, UsageQueryParams, PaginatedResponse, UsageRequestType } from '@/types'
+import type { AdminUsageDetailResponse, AdminUsageLog, UsageQueryParams, PaginatedResponse, UsageRequestType } from '@/types'
 
 // ==================== Types ====================
 
@@ -76,6 +76,11 @@ export interface CreateUsageCleanupTaskRequest {
 export interface AdminUsageQueryParams extends UsageQueryParams {
   user_id?: number
   exact_total?: boolean
+}
+
+export async function getDetail(usageLogID: number): Promise<AdminUsageDetailResponse> {
+  const { data } = await apiClient.get<AdminUsageDetailResponse>(`/admin/usage/${usageLogID}/detail`)
+  return data
 }
 
 // ==================== API Functions ====================
@@ -191,6 +196,7 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
 
 export const adminUsageAPI = {
   list,
+  getDetail,
   getStats,
   searchUsers,
   searchApiKeys,

@@ -54,7 +54,13 @@
           </div>
         </template>
       </UsageFilters>
-      <UsageTable :data="usageLogs" :loading="loading" :columns="visibleColumns" @userClick="handleUserClick" />
+      <UsageTable
+        :data="usageLogs"
+        :loading="loading"
+        :columns="visibleColumns"
+        @userClick="handleUserClick"
+        @viewDetail="handleViewDetail"
+      />
       <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
     </div>
   </AppLayout>
@@ -73,6 +79,14 @@
     :hide-actions="true"
     @close="showBalanceHistoryModal = false; balanceHistoryUser = null"
   />
+  <UsageDetailModal
+    :show="showUsageDetailModal"
+    :loading="usageDetailLoading"
+    :usage="selectedUsageLog"
+    :detail="usageDetail"
+    :error-message="usageDetailError"
+    @close="closeUsageDetailModal"
+  />
 </template>
 
 <script setup lang="ts">
@@ -86,10 +100,11 @@ import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination fro
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
+import UsageDetailModal from '@/components/admin/usage/UsageDetailModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import Icon from '@/components/icons/Icon.vue'
-import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
+import type { AdminUsageDetailResponse, AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -102,6 +117,11 @@ const cleanupDialogVisible = ref(false)
 // Balance history modal state
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
+const showUsageDetailModal = ref(false)
+const selectedUsageLog = ref<AdminUsageLog | null>(null)
+const usageDetail = ref<AdminUsageDetailResponse | null>(null)
+const usageDetailLoading = ref(false)
+const usageDetailError = ref('')
 
 const handleUserClick = async (userId: number) => {
   try {
@@ -111,6 +131,29 @@ const handleUserClick = async (userId: number) => {
   } catch {
     appStore.showError(t('admin.usage.failedToLoadUser'))
   }
+}
+
+const handleViewDetail = async (log: AdminUsageLog) => {
+  selectedUsageLog.value = log
+  usageDetail.value = null
+  usageDetailError.value = ''
+  showUsageDetailModal.value = true
+  usageDetailLoading.value = true
+  try {
+    usageDetail.value = await adminUsageAPI.getDetail(log.id)
+  } catch (error: any) {
+    usageDetailError.value = error?.response?.data?.message || t('admin.usage.detail.loadFailed')
+  } finally {
+    usageDetailLoading.value = false
+  }
+}
+
+const closeUsageDetailModal = () => {
+  showUsageDetailModal.value = false
+  usageDetailLoading.value = false
+  usageDetailError.value = ''
+  usageDetail.value = null
+  selectedUsageLog.value = null
 }
 
 const granularityOptions = computed(() => [{ value: 'day', label: t('admin.dashboard.day') }, { value: 'hour', label: t('admin.dashboard.hour') }])
@@ -272,9 +315,12 @@ const toggleableColumns = computed(() =>
 )
 
 const visibleColumns = computed(() =>
-  allColumns.value.filter(col =>
+  [
+    ...allColumns.value.filter(col =>
     ALWAYS_VISIBLE.includes(col.key) || !hiddenColumns.has(col.key)
-  )
+    ),
+    { key: 'actions', label: t('common.actions'), sortable: false }
+  ]
 )
 
 const isColumnVisible = (key: string) => !hiddenColumns.has(key)

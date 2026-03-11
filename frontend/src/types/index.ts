@@ -989,11 +989,35 @@ export interface AdminUsageLog extends UsageLog {
   // 账号计费倍率（仅管理员可见）
   account_rate_multiplier?: number | null
 
+  // 是否已采集原始请求/响应详情
+  has_detail?: boolean
+
   // 用户请求 IP（仅管理员可见）
   ip_address?: string | null
 
   // 最小账号信息（仅管理员接口返回）
   account?: UsageLogAccountSummary
+}
+
+export interface UsageDetailPayload {
+  kind: 'body' | 'frames'
+  content_type?: string | null
+  size_bytes: number
+  is_json: boolean
+  complete?: boolean | null
+  body?: string | null
+  frames?: string[] | null
+}
+
+export interface AdminUsageDetailResponse {
+  usage_log_id: number
+  has_detail: boolean
+  request_id: string
+  model: string
+  request_type: UsageRequestType
+  created_at: string
+  request?: UsageDetailPayload | null
+  response?: UsageDetailPayload | null
 }
 
 export interface UsageCleanupFilters {

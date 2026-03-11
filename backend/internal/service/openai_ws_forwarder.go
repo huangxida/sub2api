@@ -2691,12 +2691,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return lease, nil
 	}
 
-	writeClientMessage := func(message []byte) error {
-		writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
-		defer cancel()
-		return clientConn.Write(writeCtx, coderws.MessageText, message)
-	}
-
 	readClientMessage := func() ([]byte, error) {
 		msgType, payload, readErr := clientConn.Read(ctx)
 		if readErr != nil {
@@ -2718,6 +2712,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		frameRecorder := NewUsageCapturedFrameRecorder(s.usageDetailCapture.MaxResponseBytes, s.usageDetailCapture.MaxWSResponseFrames)
+		writeClientMessage := func(message []byte) error {
+			writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+			defer cancel()
+			if err := clientConn.Write(writeCtx, coderws.MessageText, message); err != nil {
+				return err
+			}
+			frameRecorder.Add(message)
+			return nil
+		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -2920,17 +2924,27 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						clientDisconnected,
 					)
 				}
+				requestPayload := CaptureUsagePayload(payload, s.usageDetailCapture.MaxRequestBytes)
+				responsePayload := frameRecorder.Snapshot()
 				return &OpenAIForwardResult{
-					RequestID:       responseID,
-					Usage:           usage,
-					Model:           originalModel,
-					ServiceTier:     extractOpenAIServiceTierFromBody(payload),
-					ReasoningEffort: extractOpenAIReasoningEffortFromBody(payload, originalModel),
-					Stream:          reqStream,
-					OpenAIWSMode:    true,
-					ResponseHeaders: lease.HandshakeHeaders(),
-					Duration:        time.Since(turnStart),
-					FirstTokenMs:    firstTokenMs,
+					RequestID:           responseID,
+					Usage:               usage,
+					Model:               originalModel,
+					ServiceTier:         extractOpenAIServiceTierFromBody(payload),
+					ReasoningEffort:     extractOpenAIReasoningEffortFromBody(payload, originalModel),
+					Stream:              reqStream,
+					OpenAIWSMode:        true,
+					RequestBody:         requestPayload.Body,
+					RequestBytes:        requestPayload.Bytes,
+					RequestComplete:     requestPayload.Complete,
+					RequestContentType:  "application/json",
+					ResponseFrames:      responsePayload.Frames,
+					ResponseBytes:       responsePayload.Bytes,
+					ResponseContentType: "application/json",
+					ResponseComplete:    !clientDisconnected && responsePayload.Complete,
+					ResponseHeaders:     lease.HandshakeHeaders(),
+					Duration:            time.Since(turnStart),
+					FirstTokenMs:        firstTokenMs,
 				}, nil
 			}
 		}

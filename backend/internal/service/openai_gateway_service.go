@@ -218,12 +218,21 @@ type OpenAIForwardResult struct {
 	ServiceTier *string
 	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix.
 	// Stored for usage records display; nil means not provided / not applicable.
-	ReasoningEffort *string
-	Stream          bool
-	OpenAIWSMode    bool
-	ResponseHeaders http.Header
-	Duration        time.Duration
-	FirstTokenMs    *int
+	ReasoningEffort     *string
+	Stream              bool
+	OpenAIWSMode        bool
+	RequestBody         []byte
+	RequestBytes        int64
+	RequestComplete     bool
+	RequestContentType  string
+	ResponseBody        []byte
+	ResponseFrames      [][]byte
+	ResponseBytes       int64
+	ResponseContentType string
+	ResponseComplete    bool
+	ResponseHeaders     http.Header
+	Duration            time.Duration
+	FirstTokenMs        *int
 }
 
 type OpenAIWSRetryMetricsSnapshot struct {
@@ -259,6 +268,7 @@ type openAIWSRetryMetrics struct {
 type OpenAIGatewayService struct {
 	accountRepo           AccountRepository
 	usageLogRepo          UsageLogRepository
+	usageLogDetailService *UsageLogDetailService
 	userRepo              UserRepository
 	userSubRepo           UserSubscriptionRepository
 	cache                 GatewayCache
@@ -275,6 +285,7 @@ type OpenAIGatewayService struct {
 	openAITokenProvider   *OpenAITokenProvider
 	toolCorrector         *CodexToolCorrector
 	openaiWSResolver      OpenAIWSProtocolResolver
+	usageDetailCapture    UsageDetailCaptureConfig
 
 	openaiWSPoolOnce              sync.Once
 	openaiWSStateStoreOnce        sync.Once
@@ -295,6 +306,7 @@ type OpenAIGatewayService struct {
 func NewOpenAIGatewayService(
 	accountRepo AccountRepository,
 	usageLogRepo UsageLogRepository,
+	usageLogDetailService *UsageLogDetailService,
 	userRepo UserRepository,
 	userSubRepo UserSubscriptionRepository,
 	userGroupRateRepo UserGroupRateRepository,
@@ -310,18 +322,19 @@ func NewOpenAIGatewayService(
 	openAITokenProvider *OpenAITokenProvider,
 ) *OpenAIGatewayService {
 	svc := &OpenAIGatewayService{
-		accountRepo:         accountRepo,
-		usageLogRepo:        usageLogRepo,
-		userRepo:            userRepo,
-		userSubRepo:         userSubRepo,
-		cache:               cache,
-		cfg:                 cfg,
-		codexDetector:       NewOpenAICodexClientRestrictionDetector(cfg),
-		schedulerSnapshot:   schedulerSnapshot,
-		concurrencyService:  concurrencyService,
-		billingService:      billingService,
-		rateLimitService:    rateLimitService,
-		billingCacheService: billingCacheService,
+		accountRepo:           accountRepo,
+		usageLogRepo:          usageLogRepo,
+		usageLogDetailService: usageLogDetailService,
+		userRepo:              userRepo,
+		userSubRepo:           userSubRepo,
+		cache:                 cache,
+		cfg:                   cfg,
+		codexDetector:         NewOpenAICodexClientRestrictionDetector(cfg),
+		schedulerSnapshot:     schedulerSnapshot,
+		concurrencyService:    concurrencyService,
+		billingService:        billingService,
+		rateLimitService:      rateLimitService,
+		billingCacheService:   billingCacheService,
 		userGroupRateResolver: newUserGroupRateResolver(
 			userGroupRateRepo,
 			nil,
@@ -334,6 +347,7 @@ func NewOpenAIGatewayService(
 		openAITokenProvider:  openAITokenProvider,
 		toolCorrector:        NewCodexToolCorrector(),
 		openaiWSResolver:     NewOpenAIWSProtocolResolver(cfg),
+		usageDetailCapture:   ResolveUsageDetailCaptureConfig(cfg),
 		responseHeaderFilter: compileResponseHeaderFilter(cfg),
 	}
 	svc.logOpenAIWSModeBootstrap()
@@ -3670,14 +3684,23 @@ func (s *OpenAIGatewayService) replaceModelInResponseBody(body []byte, fromModel
 
 // OpenAIRecordUsageInput input for recording usage
 type OpenAIRecordUsageInput struct {
-	Result        *OpenAIForwardResult
-	APIKey        *APIKey
-	User          *User
-	Account       *Account
-	Subscription  *UserSubscription
-	UserAgent     string // 请求的 User-Agent
-	IPAddress     string // 请求的客户端 IP 地址
-	APIKeyService APIKeyQuotaUpdater
+	Result              *OpenAIForwardResult
+	APIKey              *APIKey
+	User                *User
+	Account             *Account
+	Subscription        *UserSubscription
+	UserAgent           string // 请求的 User-Agent
+	IPAddress           string // 请求的客户端 IP 地址
+	RequestBody         []byte
+	RequestBytes        int64
+	RequestComplete     bool
+	RequestContentType  string
+	ResponseBody        []byte
+	ResponseFrames      [][]byte
+	ResponseBytes       int64
+	ResponseContentType string
+	ResponseComplete    bool
+	APIKeyService       APIKeyQuotaUpdater
 }
 
 // RecordUsage records usage and deducts balance
@@ -3789,6 +3812,64 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	inserted, err := s.usageLogRepo.Create(ctx, usageLog)
+	if usageLog.ID > 0 && s.usageLogDetailService != nil && s.usageDetailCapture.Enabled && !IsUsageRecordSyncFallback(ctx) {
+		requestBody := input.RequestBody
+		if len(requestBody) == 0 && len(result.RequestBody) > 0 {
+			requestBody = result.RequestBody
+		}
+		requestBytes := input.RequestBytes
+		if requestBytes <= 0 && result.RequestBytes > 0 {
+			requestBytes = result.RequestBytes
+		}
+		if requestBytes <= 0 {
+			requestBytes = int64(len(requestBody))
+		}
+		requestComplete := input.RequestComplete
+		if !requestComplete && result.RequestComplete {
+			requestComplete = true
+		}
+		requestContentType := input.RequestContentType
+		if strings.TrimSpace(requestContentType) == "" {
+			requestContentType = result.RequestContentType
+		}
+		responseBody := input.ResponseBody
+		if len(responseBody) == 0 && len(result.ResponseBody) > 0 {
+			responseBody = result.ResponseBody
+		}
+		responseFrames := input.ResponseFrames
+		if len(responseFrames) == 0 && len(result.ResponseFrames) > 0 {
+			responseFrames = result.ResponseFrames
+		}
+		responseBytes := input.ResponseBytes
+		if responseBytes <= 0 && result.ResponseBytes > 0 {
+			responseBytes = result.ResponseBytes
+		}
+		if responseBytes <= 0 {
+			responseBytes = rawPayloadBytes(responseBody, responseFrames)
+		}
+		responseContentType := input.ResponseContentType
+		if strings.TrimSpace(responseContentType) == "" {
+			responseContentType = result.ResponseContentType
+		}
+		responseComplete := input.ResponseComplete
+		if !responseComplete && result.ResponseComplete {
+			responseComplete = true
+		}
+		if detailErr := s.usageLogDetailService.Save(ctx, UsageLogDetailSaveInput{
+			UsageLogID:          usageLog.ID,
+			RequestBody:         requestBody,
+			RequestBytes:        requestBytes,
+			RequestContentType:  requestContentType,
+			RequestComplete:     requestComplete,
+			ResponseBody:        responseBody,
+			ResponseFrames:      responseFrames,
+			ResponseBytes:       responseBytes,
+			ResponseContentType: responseContentType,
+			ResponseComplete:    responseComplete,
+		}); detailErr != nil {
+			logger.LegacyPrintf("service.openai_gateway", "Save usage log detail failed: %v", detailErr)
+		}
+	}
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)

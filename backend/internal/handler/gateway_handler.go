@@ -49,6 +49,7 @@ type GatewayHandler struct {
 	userMsgQueueHelper        *UserMsgQueueHelper
 	maxAccountSwitches        int
 	maxAccountSwitchesGemini  int
+	usageDetailCapture        service.UsageDetailCaptureConfig
 	cfg                       *config.Config
 	settingService            *service.SettingService
 }
@@ -102,6 +103,7 @@ func NewGatewayHandler(
 		userMsgQueueHelper:        umqHelper,
 		maxAccountSwitches:        maxAccountSwitches,
 		maxAccountSwitchesGemini:  maxAccountSwitchesGemini,
+		usageDetailCapture:        service.ResolveUsageDetailCaptureConfig(cfg),
 		cfg:                       cfg,
 		settingService:            settingService,
 	}
@@ -178,6 +180,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	c.Request = c.Request.WithContext(service.WithThinkingEnabled(c.Request.Context(), parsedReq.ThinkingEnabled, h.metadataBridgeEnabled()))
 
 	setOpsRequestContext(c, reqModel, reqStream, body)
+	var payloadCapture *usagePayloadCaptureWriter
+	if h.usageDetailCapture.Enabled {
+		var restoreWriter func()
+		payloadCapture, restoreWriter = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
+		defer restoreWriter()
+	}
 
 	// 验证 model 必填
 	if reqModel == "" {
@@ -434,19 +442,35 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
+			requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+			var responseBody []byte
+			var responseContentType string
+			var responseBytes int64
+			responseComplete := true
+			if payloadCapture != nil {
+				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+			}
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:            result,
-					APIKey:            apiKey,
-					User:              apiKey.User,
-					Account:           account,
-					Subscription:      subscription,
-					UserAgent:         userAgent,
-					IPAddress:         clientIP,
-					ForceCacheBilling: fs.ForceCacheBilling,
-					APIKeyService:     h.apiKeyService,
+					Result:              result,
+					APIKey:              apiKey,
+					User:                apiKey.User,
+					Account:             account,
+					Subscription:        subscription,
+					UserAgent:           userAgent,
+					IPAddress:           clientIP,
+					RequestBody:         requestPayload.Body,
+					RequestBytes:        requestPayload.Bytes,
+					RequestComplete:     requestPayload.Complete,
+					RequestContentType:  c.ContentType(),
+					ResponseBody:        responseBody,
+					ResponseBytes:       responseBytes,
+					ResponseContentType: responseContentType,
+					ResponseComplete:    responseComplete,
+					ForceCacheBilling:   fs.ForceCacheBilling,
+					APIKeyService:       h.apiKeyService,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),
@@ -736,19 +760,35 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
+			requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+			var responseBody []byte
+			var responseContentType string
+			var responseBytes int64
+			responseComplete := true
+			if payloadCapture != nil {
+				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+			}
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:            result,
-					APIKey:            currentAPIKey,
-					User:              currentAPIKey.User,
-					Account:           account,
-					Subscription:      currentSubscription,
-					UserAgent:         userAgent,
-					IPAddress:         clientIP,
-					ForceCacheBilling: fs.ForceCacheBilling,
-					APIKeyService:     h.apiKeyService,
+					Result:              result,
+					APIKey:              currentAPIKey,
+					User:                currentAPIKey.User,
+					Account:             account,
+					Subscription:        currentSubscription,
+					UserAgent:           userAgent,
+					IPAddress:           clientIP,
+					RequestBody:         requestPayload.Body,
+					RequestBytes:        requestPayload.Bytes,
+					RequestComplete:     requestPayload.Complete,
+					RequestContentType:  c.ContentType(),
+					ResponseBody:        responseBody,
+					ResponseBytes:       responseBytes,
+					ResponseContentType: responseContentType,
+					ResponseComplete:    responseComplete,
+					ForceCacheBilling:   fs.ForceCacheBilling,
+					APIKeyService:       h.apiKeyService,
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),

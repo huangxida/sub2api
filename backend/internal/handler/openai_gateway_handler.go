@@ -34,6 +34,7 @@ type OpenAIGatewayHandler struct {
 	errorPassthroughService *service.ErrorPassthroughService
 	concurrencyHelper       *ConcurrencyHelper
 	maxAccountSwitches      int
+	usageDetailCapture      service.UsageDetailCaptureConfig
 	cfg                     *config.Config
 }
 
@@ -63,6 +64,7 @@ func NewOpenAIGatewayHandler(
 		errorPassthroughService: errorPassthroughService,
 		concurrencyHelper:       NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
 		maxAccountSwitches:      maxAccountSwitches,
+		usageDetailCapture:      service.ResolveUsageDetailCaptureConfig(cfg),
 		cfg:                     cfg,
 	}
 }
@@ -173,6 +175,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	}
 
 	setOpsRequestContext(c, reqModel, reqStream, body)
+	var payloadCapture *usagePayloadCaptureWriter
+	if h.usageDetailCapture.Enabled {
+		var restoreWriter func()
+		payloadCapture, restoreWriter = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
+		defer restoreWriter()
+	}
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
 	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
@@ -352,18 +360,34 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+		var responseBody []byte
+		var responseContentType string
+		var responseBytes int64
+		responseComplete := true
+		if payloadCapture != nil {
+			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:        result,
-				APIKey:        apiKey,
-				User:          apiKey.User,
-				Account:       account,
-				Subscription:  subscription,
-				UserAgent:     userAgent,
-				IPAddress:     clientIP,
-				APIKeyService: h.apiKeyService,
+				Result:              result,
+				APIKey:              apiKey,
+				User:                apiKey.User,
+				Account:             account,
+				Subscription:        subscription,
+				UserAgent:           userAgent,
+				IPAddress:           clientIP,
+				RequestBody:         requestPayload.Body,
+				RequestBytes:        requestPayload.Bytes,
+				RequestComplete:     requestPayload.Complete,
+				RequestContentType:  c.ContentType(),
+				ResponseBody:        responseBody,
+				ResponseBytes:       responseBytes,
+				ResponseContentType: responseContentType,
+				ResponseComplete:    responseComplete,
+				APIKeyService:       h.apiKeyService,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.responses"),
@@ -531,6 +555,12 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	setOpsRequestContext(c, reqModel, reqStream, body)
+	var payloadCapture *usagePayloadCaptureWriter
+	if h.usageDetailCapture.Enabled {
+		var restoreWriter func()
+		payloadCapture, restoreWriter = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
+		defer restoreWriter()
+	}
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -732,17 +762,33 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+		var responseBody []byte
+		var responseContentType string
+		var responseBytes int64
+		responseComplete := true
+		if payloadCapture != nil {
+			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+		}
 
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:        result,
-				APIKey:        apiKey,
-				User:          apiKey.User,
-				Account:       account,
-				Subscription:  subscription,
-				UserAgent:     userAgent,
-				IPAddress:     clientIP,
-				APIKeyService: h.apiKeyService,
+				Result:              result,
+				APIKey:              apiKey,
+				User:                apiKey.User,
+				Account:             account,
+				Subscription:        subscription,
+				UserAgent:           userAgent,
+				IPAddress:           clientIP,
+				RequestBody:         requestPayload.Body,
+				RequestBytes:        requestPayload.Bytes,
+				RequestComplete:     requestPayload.Complete,
+				RequestContentType:  c.ContentType(),
+				ResponseBody:        responseBody,
+				ResponseBytes:       responseBytes,
+				ResponseContentType: responseContentType,
+				ResponseComplete:    responseComplete,
+				APIKeyService:       h.apiKeyService,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.openai_gateway.messages"),
@@ -1231,14 +1277,23 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, true, result.FirstTokenMs)
 			h.submitUsageRecordTask(func(taskCtx context.Context) {
 				if err := h.gatewayService.RecordUsage(taskCtx, &service.OpenAIRecordUsageInput{
-					Result:        result,
-					APIKey:        apiKey,
-					User:          apiKey.User,
-					Account:       account,
-					Subscription:  subscription,
-					UserAgent:     userAgent,
-					IPAddress:     clientIP,
-					APIKeyService: h.apiKeyService,
+					Result:              result,
+					APIKey:              apiKey,
+					User:                apiKey.User,
+					Account:             account,
+					Subscription:        subscription,
+					UserAgent:           userAgent,
+					IPAddress:           clientIP,
+					RequestBody:         result.RequestBody,
+					RequestBytes:        result.RequestBytes,
+					RequestComplete:     result.RequestComplete,
+					RequestContentType:  result.RequestContentType,
+					ResponseBody:        result.ResponseBody,
+					ResponseFrames:      result.ResponseFrames,
+					ResponseBytes:       result.ResponseBytes,
+					ResponseContentType: result.ResponseContentType,
+					ResponseComplete:    result.ResponseComplete,
+					APIKeyService:       h.apiKeyService,
 				}); err != nil {
 					reqLog.Error("openai.websocket_record_usage_failed",
 						zap.Int64("account_id", account.ID),

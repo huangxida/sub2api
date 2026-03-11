@@ -46,6 +46,7 @@ type RelayTurnResult struct {
 	TerminalEventType string
 	Duration          time.Duration
 	FirstTokenMs      *int
+	Complete          bool
 }
 
 type RelayExit struct {
@@ -401,8 +402,8 @@ func runUpstreamToClient(
 		case coderws.MessageBinary:
 			// binary frame 直接透传，不进入 JSON 观测路径（避免无效解析开销）。
 		}
-		emitTurnComplete(onTurnComplete, state, observedEvent)
 		if dropDownstreamWrites != nil && dropDownstreamWrites.Load() {
+			emitTurnComplete(onTurnComplete, state, observedEvent, false)
 			if droppedFrames != nil {
 				droppedFrames.Add(1)
 			}
@@ -425,6 +426,7 @@ func runUpstreamToClient(
 			continue
 		}
 		if err := writeClient(msgType, payload); err != nil {
+			emitTurnComplete(onTurnComplete, state, observedEvent, false)
 			emitRelayTrace(onTrace, RelayTraceEvent{
 				Stage:           "write_client_failed",
 				Direction:       "upstream_to_client",
@@ -437,6 +439,7 @@ func runUpstreamToClient(
 			return
 		}
 		wroteDownstream = true
+		emitTurnComplete(onTurnComplete, state, observedEvent, true)
 		if forwardedFrames != nil {
 			forwardedFrames.Add(1)
 		}
@@ -589,6 +592,7 @@ func emitTurnComplete(
 	onTurnComplete func(turn RelayTurnResult),
 	state *relayState,
 	observed observedUpstreamEvent,
+	complete bool,
 ) {
 	if onTurnComplete == nil || !observed.terminal {
 		return
@@ -608,6 +612,7 @@ func emitTurnComplete(
 		TerminalEventType: observed.eventType,
 		Duration:          observed.duration,
 		FirstTokenMs:      openAIWSRelayCloneIntPtr(observed.firstToken),
+		Complete:          complete,
 	})
 }
 

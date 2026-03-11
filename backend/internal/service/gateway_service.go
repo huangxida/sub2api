@@ -504,6 +504,7 @@ type GatewayService struct {
 	accountRepo           AccountRepository
 	groupRepo             GroupRepository
 	usageLogRepo          UsageLogRepository
+	usageLogDetailService *UsageLogDetailService
 	userRepo              UserRepository
 	userSubRepo           UserSubscriptionRepository
 	userGroupRateRepo     UserGroupRateRepository
@@ -528,6 +529,7 @@ type GatewayService struct {
 	modelsListCacheTTL    time.Duration
 	settingService        *SettingService
 	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
+	usageDetailCapture    UsageDetailCaptureConfig
 	debugModelRouting     atomic.Bool
 	debugClaudeMimic      atomic.Bool
 }
@@ -537,6 +539,7 @@ func NewGatewayService(
 	accountRepo AccountRepository,
 	groupRepo GroupRepository,
 	usageLogRepo UsageLogRepository,
+	usageLogDetailService *UsageLogDetailService,
 	userRepo UserRepository,
 	userSubRepo UserSubscriptionRepository,
 	userGroupRateRepo UserGroupRateRepository,
@@ -560,31 +563,33 @@ func NewGatewayService(
 	modelsListTTL := resolveModelsListCacheTTL(cfg)
 
 	svc := &GatewayService{
-		accountRepo:          accountRepo,
-		groupRepo:            groupRepo,
-		usageLogRepo:         usageLogRepo,
-		userRepo:             userRepo,
-		userSubRepo:          userSubRepo,
-		userGroupRateRepo:    userGroupRateRepo,
-		cache:                cache,
-		digestStore:          digestStore,
-		cfg:                  cfg,
-		schedulerSnapshot:    schedulerSnapshot,
-		concurrencyService:   concurrencyService,
-		billingService:       billingService,
-		rateLimitService:     rateLimitService,
-		billingCacheService:  billingCacheService,
-		identityService:      identityService,
-		httpUpstream:         httpUpstream,
-		deferredService:      deferredService,
-		claudeTokenProvider:  claudeTokenProvider,
-		sessionLimitCache:    sessionLimitCache,
-		rpmCache:             rpmCache,
-		userGroupRateCache:   gocache.New(userGroupRateTTL, time.Minute),
-		settingService:       settingService,
-		modelsListCache:      gocache.New(modelsListTTL, time.Minute),
-		modelsListCacheTTL:   modelsListTTL,
-		responseHeaderFilter: compileResponseHeaderFilter(cfg),
+		accountRepo:           accountRepo,
+		groupRepo:             groupRepo,
+		usageLogRepo:          usageLogRepo,
+		usageLogDetailService: usageLogDetailService,
+		userRepo:              userRepo,
+		userSubRepo:           userSubRepo,
+		userGroupRateRepo:     userGroupRateRepo,
+		cache:                 cache,
+		digestStore:           digestStore,
+		cfg:                   cfg,
+		schedulerSnapshot:     schedulerSnapshot,
+		concurrencyService:    concurrencyService,
+		billingService:        billingService,
+		rateLimitService:      rateLimitService,
+		billingCacheService:   billingCacheService,
+		identityService:       identityService,
+		httpUpstream:          httpUpstream,
+		deferredService:       deferredService,
+		claudeTokenProvider:   claudeTokenProvider,
+		sessionLimitCache:     sessionLimitCache,
+		rpmCache:              rpmCache,
+		userGroupRateCache:    gocache.New(userGroupRateTTL, time.Minute),
+		settingService:        settingService,
+		modelsListCache:       gocache.New(modelsListTTL, time.Minute),
+		modelsListCacheTTL:    modelsListTTL,
+		usageDetailCapture:    ResolveUsageDetailCaptureConfig(cfg),
+		responseHeaderFilter:  compileResponseHeaderFilter(cfg),
 	}
 	svc.userGroupRateResolver = newUserGroupRateResolver(
 		userGroupRateRepo,
@@ -6557,15 +6562,23 @@ func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID,
 
 // RecordUsageInput 记录使用量的输入参数
 type RecordUsageInput struct {
-	Result            *ForwardResult
-	APIKey            *APIKey
-	User              *User
-	Account           *Account
-	Subscription      *UserSubscription  // 可选：订阅信息
-	UserAgent         string             // 请求的 User-Agent
-	IPAddress         string             // 请求的客户端 IP 地址
-	ForceCacheBilling bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
-	APIKeyService     APIKeyQuotaUpdater // 可选：用于更新API Key配额
+	Result              *ForwardResult
+	APIKey              *APIKey
+	User                *User
+	Account             *Account
+	Subscription        *UserSubscription // 可选：订阅信息
+	UserAgent           string            // 请求的 User-Agent
+	IPAddress           string            // 请求的客户端 IP 地址
+	RequestBody         []byte
+	RequestBytes        int64
+	RequestComplete     bool
+	RequestContentType  string
+	ResponseBody        []byte
+	ResponseBytes       int64
+	ResponseContentType string
+	ResponseComplete    bool
+	ForceCacheBilling   bool               // 强制缓存计费：将 input_tokens 转为 cache_read 计费（用于粘性会话切换）
+	APIKeyService       APIKeyQuotaUpdater // 可选：用于更新API Key配额
 }
 
 // APIKeyQuotaUpdater defines the interface for updating API Key quota and rate limit usage
@@ -6810,6 +6823,22 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	inserted, err := s.usageLogRepo.Create(ctx, usageLog)
 	if err != nil {
 		logger.LegacyPrintf("service.gateway", "Create usage log failed: %v", err)
+	}
+	if usageLog.ID > 0 && s.usageLogDetailService != nil && s.usageDetailCapture.Enabled && !IsUsageRecordSyncFallback(ctx) {
+		responseComplete := input.ResponseComplete
+		if detailErr := s.usageLogDetailService.Save(ctx, UsageLogDetailSaveInput{
+			UsageLogID:          usageLog.ID,
+			RequestBody:         input.RequestBody,
+			RequestBytes:        input.RequestBytes,
+			RequestContentType:  input.RequestContentType,
+			RequestComplete:     input.RequestComplete,
+			ResponseBody:        input.ResponseBody,
+			ResponseBytes:       input.ResponseBytes,
+			ResponseContentType: input.ResponseContentType,
+			ResponseComplete:    responseComplete,
+		}); detailErr != nil {
+			logger.LegacyPrintf("service.gateway", "Save usage log detail failed: %v", detailErr)
+		}
 	}
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {

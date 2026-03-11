@@ -37,6 +37,7 @@ type SoraGatewayHandler struct {
 	usageRecordWorkerPool *service.UsageRecordWorkerPool
 	concurrencyHelper     *ConcurrencyHelper
 	maxAccountSwitches    int
+	usageDetailCapture    service.UsageDetailCaptureConfig
 	streamMode            string
 	soraTLSEnabled        bool
 	soraMediaSigningKey   string
@@ -79,6 +80,7 @@ func NewSoraGatewayHandler(
 		usageRecordWorkerPool: usageRecordWorkerPool,
 		concurrencyHelper:     NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
 		maxAccountSwitches:    maxAccountSwitches,
+		usageDetailCapture:    service.ResolveUsageDetailCaptureConfig(cfg),
 		streamMode:            strings.ToLower(streamMode),
 		soraTLSEnabled:        soraTLSEnabled,
 		soraMediaSigningKey:   signKey,
@@ -159,6 +161,12 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 
 	setOpsRequestContext(c, reqModel, clientStream, body)
+	var payloadCapture *usagePayloadCaptureWriter
+	if h.usageDetailCapture.Enabled {
+		var restoreWriter func()
+		payloadCapture, restoreWriter = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
+		defer restoreWriter()
+	}
 
 	platform := ""
 	if forced, ok := middleware2.GetForcePlatformFromContext(c); ok {
@@ -399,17 +407,33 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+		var responseBody []byte
+		var responseContentType string
+		var responseBytes int64
+		responseComplete := true
+		if payloadCapture != nil {
+			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+		}
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-				Result:       result,
-				APIKey:       apiKey,
-				User:         apiKey.User,
-				Account:      account,
-				Subscription: subscription,
-				UserAgent:    userAgent,
-				IPAddress:    clientIP,
+				Result:              result,
+				APIKey:              apiKey,
+				User:                apiKey.User,
+				Account:             account,
+				Subscription:        subscription,
+				UserAgent:           userAgent,
+				IPAddress:           clientIP,
+				RequestBody:         requestPayload.Body,
+				RequestBytes:        requestPayload.Bytes,
+				RequestComplete:     requestPayload.Complete,
+				RequestContentType:  c.ContentType(),
+				ResponseBody:        responseBody,
+				ResponseBytes:       responseBytes,
+				ResponseContentType: responseContentType,
+				ResponseComplete:    responseComplete,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.sora_gateway.chat_completions"),
