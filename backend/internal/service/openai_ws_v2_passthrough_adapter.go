@@ -129,17 +129,6 @@ func (r *openAIWSTurnPayloadRecorder) TakeTurn() (UsageCapturedPayload, UsageCap
 	return request, response
 }
 
-func cloneOpenAIWSBinaryFrames(items [][]byte) [][]byte {
-	if len(items) == 0 {
-		return nil
-	}
-	cloned := make([][]byte, 0, len(items))
-	for idx := range items {
-		cloned = append(cloned, cloneOpenAIWSPayloadBytes(items[idx]))
-	}
-	return cloned
-}
-
 func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	ctx context.Context,
 	c *gin.Context,
