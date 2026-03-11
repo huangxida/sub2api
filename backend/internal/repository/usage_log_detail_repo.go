@@ -113,7 +113,7 @@ func (r *usageLogDetailRepository) GetByUsageLogID(ctx context.Context, usageLog
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
 			return nil, err
@@ -176,7 +176,7 @@ func (r *usageLogDetailRepository) BatchHasDetails(ctx context.Context, usageLog
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var usageLogID int64
