@@ -435,6 +435,7 @@ func TestSoraGatewayHandler_ChatCompletions(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		testutil.StubGatewayCache{},
 		cfg,
 		nil,

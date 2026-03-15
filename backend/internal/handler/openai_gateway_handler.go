@@ -174,8 +174,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		}
 	}
 	var payloadCapture *usagePayloadCaptureWriter
-	restorePayloadCapture := func() {}
 	if h.usageDetailCapture.Enabled {
+		var restorePayloadCapture func()
 		payloadCapture, restorePayloadCapture = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
 		defer restorePayloadCapture()
 	}
@@ -560,8 +560,8 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
 	var payloadCapture *usagePayloadCaptureWriter
-	restorePayloadCapture := func() {}
 	if h.usageDetailCapture.Enabled {
+		var restorePayloadCapture func()
 		payloadCapture, restorePayloadCapture = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
 		defer restorePayloadCapture()
 	}
