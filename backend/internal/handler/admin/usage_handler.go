@@ -219,7 +219,7 @@ func (h *UsageHandler) Detail(c *gin.Context) {
 		return
 	}
 
-	detail, err := h.usageDetailService.GetByUsageLogID(c.Request.Context(), usageLogID)
+	detail, err := h.usageDetailService.GetByUsageLog(c.Request.Context(), usageLog)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -624,14 +624,5 @@ func (h *UsageHandler) batchHasUsageDetails(ctx context.Context, logs []service.
 	if h == nil || h.usageDetailService == nil || len(logs) == 0 {
 		return result, nil
 	}
-	ids := make([]int64, 0, len(logs))
-	for i := range logs {
-		if logs[i].ID > 0 {
-			ids = append(ids, logs[i].ID)
-		}
-	}
-	if len(ids) == 0 {
-		return result, nil
-	}
-	return h.usageDetailService.BatchHasDetails(ctx, ids)
+	return h.usageDetailService.BatchHasDetailsByUsageLogs(ctx, logs)
 }

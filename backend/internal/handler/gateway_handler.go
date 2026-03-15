@@ -49,9 +49,9 @@ type GatewayHandler struct {
 	userMsgQueueHelper        *UserMsgQueueHelper
 	maxAccountSwitches        int
 	maxAccountSwitchesGemini  int
-	usageDetailCapture        service.UsageDetailCaptureConfig
 	cfg                       *config.Config
 	settingService            *service.SettingService
+	usageDetailCapture        service.UsageDetailCaptureConfig
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -103,9 +103,9 @@ func NewGatewayHandler(
 		userMsgQueueHelper:        umqHelper,
 		maxAccountSwitches:        maxAccountSwitches,
 		maxAccountSwitchesGemini:  maxAccountSwitchesGemini,
-		usageDetailCapture:        service.ResolveUsageDetailCaptureConfig(cfg),
 		cfg:                       cfg,
 		settingService:            settingService,
+		usageDetailCapture:        service.ResolveUsageDetailCaptureConfig(cfg),
 	}
 }
 
@@ -142,6 +142,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
+	}
+	var payloadCapture *usagePayloadCaptureWriter
+	restorePayloadCapture := func() {}
+	if h.usageDetailCapture.Enabled {
+		payloadCapture, restorePayloadCapture = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
+		defer restorePayloadCapture()
 	}
 
 	if len(body) == 0 {
@@ -180,12 +186,6 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	c.Request = c.Request.WithContext(service.WithThinkingEnabled(c.Request.Context(), parsedReq.ThinkingEnabled, h.metadataBridgeEnabled()))
 
 	setOpsRequestContext(c, reqModel, reqStream, body)
-	var payloadCapture *usagePayloadCaptureWriter
-	if h.usageDetailCapture.Enabled {
-		var restoreWriter func()
-		payloadCapture, restoreWriter = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
-		defer restoreWriter()
-	}
 
 	// 验证 model 必填
 	if reqModel == "" {
@@ -442,7 +442,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
-			requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+			var requestPayload service.UsageCapturedPayload
+			if h.usageDetailCapture.Enabled {
+				requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+			}
 			var responseBody []byte
 			var responseContentType string
 			var responseBytes int64
@@ -450,6 +453,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if payloadCapture != nil {
 				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
 			}
+			requestPayloadHash := service.HashUsageRequestPayload(body)
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
@@ -469,6 +473,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					ResponseBytes:       responseBytes,
 					ResponseContentType: responseContentType,
 					ResponseComplete:    responseComplete,
+					RequestPayloadHash:  requestPayloadHash,
 					ForceCacheBilling:   fs.ForceCacheBilling,
 					APIKeyService:       h.apiKeyService,
 				}); err != nil {
@@ -760,7 +765,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
-			requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+			var requestPayload service.UsageCapturedPayload
+			if h.usageDetailCapture.Enabled {
+				requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+			}
 			var responseBody []byte
 			var responseContentType string
 			var responseBytes int64
@@ -768,6 +776,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			if payloadCapture != nil {
 				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
 			}
+			requestPayloadHash := service.HashUsageRequestPayload(body)
 
 			// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 			h.submitUsageRecordTask(func(ctx context.Context) {
@@ -787,6 +796,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					ResponseBytes:       responseBytes,
 					ResponseContentType: responseContentType,
 					ResponseComplete:    responseComplete,
+					RequestPayloadHash:  requestPayloadHash,
 					ForceCacheBilling:   fs.ForceCacheBilling,
 					APIKeyService:       h.apiKeyService,
 				}); err != nil {

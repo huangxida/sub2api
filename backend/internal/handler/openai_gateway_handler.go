@@ -34,8 +34,8 @@ type OpenAIGatewayHandler struct {
 	errorPassthroughService *service.ErrorPassthroughService
 	concurrencyHelper       *ConcurrencyHelper
 	maxAccountSwitches      int
-	usageDetailCapture      service.UsageDetailCaptureConfig
 	cfg                     *config.Config
+	usageDetailCapture      service.UsageDetailCaptureConfig
 }
 
 // NewOpenAIGatewayHandler creates a new OpenAIGatewayHandler
@@ -64,8 +64,8 @@ func NewOpenAIGatewayHandler(
 		errorPassthroughService: errorPassthroughService,
 		concurrencyHelper:       NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
 		maxAccountSwitches:      maxAccountSwitches,
-		usageDetailCapture:      service.ResolveUsageDetailCaptureConfig(cfg),
 		cfg:                     cfg,
+		usageDetailCapture:      service.ResolveUsageDetailCaptureConfig(cfg),
 	}
 }
 
@@ -173,14 +173,14 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			return
 		}
 	}
+	var payloadCapture *usagePayloadCaptureWriter
+	restorePayloadCapture := func() {}
+	if h.usageDetailCapture.Enabled {
+		payloadCapture, restorePayloadCapture = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
+		defer restorePayloadCapture()
+	}
 
 	setOpsRequestContext(c, reqModel, reqStream, body)
-	var payloadCapture *usagePayloadCaptureWriter
-	if h.usageDetailCapture.Enabled {
-		var restoreWriter func()
-		payloadCapture, restoreWriter = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
-		defer restoreWriter()
-	}
 
 	// 提前校验 function_call_output 是否具备可关联上下文，避免上游 400。
 	if !h.validateFunctionCallOutputRequest(c, body, reqLog) {
@@ -360,7 +360,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+		var requestPayload service.UsageCapturedPayload
+		if h.usageDetailCapture.Enabled {
+			requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+		}
 		var responseBody []byte
 		var responseContentType string
 		var responseBytes int64
@@ -368,6 +371,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if payloadCapture != nil {
 			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
 		}
+		requestPayloadHash := service.HashUsageRequestPayload(body)
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(func(ctx context.Context) {
@@ -387,6 +391,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				ResponseBytes:       responseBytes,
 				ResponseContentType: responseContentType,
 				ResponseComplete:    responseComplete,
+				RequestPayloadHash:  requestPayloadHash,
 				APIKeyService:       h.apiKeyService,
 			}); err != nil {
 				logger.L().With(
@@ -554,13 +559,14 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
-	setOpsRequestContext(c, reqModel, reqStream, body)
 	var payloadCapture *usagePayloadCaptureWriter
+	restorePayloadCapture := func() {}
 	if h.usageDetailCapture.Enabled {
-		var restoreWriter func()
-		payloadCapture, restoreWriter = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
-		defer restoreWriter()
+		payloadCapture, restorePayloadCapture = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
+		defer restorePayloadCapture()
 	}
+
+	setOpsRequestContext(c, reqModel, reqStream, body)
 
 	// 绑定错误透传服务，允许 service 层在非 failover 错误场景复用规则。
 	if h.errorPassthroughService != nil {
@@ -683,14 +689,9 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		service.SetOpsLatencyMs(c, service.OpsRoutingLatencyMsKey, time.Since(routingStart).Milliseconds())
 		forwardStart := time.Now()
 
-		defaultMappedModel := ""
-		if apiKey.Group != nil {
-			defaultMappedModel = apiKey.Group.DefaultMappedModel
-		}
-		// 如果使用了降级模型调度，强制使用降级模型
-		if fallbackModel := c.GetString("openai_messages_fallback_model"); fallbackModel != "" {
-			defaultMappedModel = fallbackModel
-		}
+		// 仅在调度时实际触发了降级（原模型无可用账号、改用默认模型重试成功）时，
+		// 才将降级模型传给 Forward 层做模型替换；否则保持用户请求的原始模型。
+		defaultMappedModel := c.GetString("openai_messages_fallback_model")
 		result, err := h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, body, promptCacheKey, defaultMappedModel)
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
@@ -762,7 +763,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+		var requestPayload service.UsageCapturedPayload
+		if h.usageDetailCapture.Enabled {
+			requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+		}
 		var responseBody []byte
 		var responseContentType string
 		var responseBytes int64
@@ -770,6 +774,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		if payloadCapture != nil {
 			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
 		}
+		requestPayloadHash := service.HashUsageRequestPayload(body)
 
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -788,6 +793,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				ResponseBytes:       responseBytes,
 				ResponseContentType: responseContentType,
 				ResponseComplete:    responseComplete,
+				RequestPayloadHash:  requestPayloadHash,
 				APIKeyService:       h.apiKeyService,
 			}); err != nil {
 				logger.L().With(
@@ -1293,6 +1299,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					ResponseBytes:       result.ResponseBytes,
 					ResponseContentType: result.ResponseContentType,
 					ResponseComplete:    result.ResponseComplete,
+					RequestPayloadHash:  service.HashUsageRequestPayload(firstMessage),
 					APIKeyService:       h.apiKeyService,
 				}); err != nil {
 					reqLog.Error("openai.websocket_record_usage_failed",
@@ -1483,7 +1490,6 @@ func (h *OpenAIGatewayHandler) handleFailoverExhausted(c *gin.Context, failoverE
 			return
 		}
 	}
-
 	// 使用默认的错误映射
 	status, errType, errMsg := h.mapUpstreamError(statusCode)
 	h.handleStreamingAwareError(c, status, errType, errMsg, streamStarted)

@@ -7,8 +7,15 @@ import (
 	"time"
 )
 
+type UsageLogDetailKey struct {
+	RequestID string
+	APIKeyID  int64
+}
+
 type UsageLogDetail struct {
 	UsageLogID int64
+	RequestID  string
+	APIKeyID   int64
 
 	RequestBody        *string
 	RequestContentType *string
@@ -28,6 +35,8 @@ type UsageLogDetail struct {
 
 type UsageLogDetailSaveInput struct {
 	UsageLogID int64
+	RequestID  string
+	APIKeyID   int64
 
 	RequestBody        []byte
 	RequestBytes       int64
@@ -43,8 +52,10 @@ type UsageLogDetailSaveInput struct {
 
 type UsageLogDetailRepository interface {
 	Upsert(ctx context.Context, detail *UsageLogDetail) error
+	GetByRequestKey(ctx context.Context, key UsageLogDetailKey) (*UsageLogDetail, error)
+	BatchHasDetailsByRequestKeys(ctx context.Context, keys []UsageLogDetailKey) (map[UsageLogDetailKey]bool, error)
 	GetByUsageLogID(ctx context.Context, usageLogID int64) (*UsageLogDetail, error)
-	BatchHasDetails(ctx context.Context, usageLogIDs []int64) (map[int64]bool, error)
+	BatchHasDetailsByUsageLogIDs(ctx context.Context, usageLogIDs []int64) (map[int64]bool, error)
 }
 
 type UsageLogDetailService struct {
@@ -56,12 +67,19 @@ func NewUsageLogDetailService(repo UsageLogDetailRepository) *UsageLogDetailServ
 }
 
 func (s *UsageLogDetailService) Save(ctx context.Context, input UsageLogDetailSaveInput) error {
-	if s == nil || s.repo == nil || input.UsageLogID <= 0 {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+
+	requestID := strings.TrimSpace(input.RequestID)
+	if requestID == "" || input.APIKeyID <= 0 {
 		return nil
 	}
 
 	detail := &UsageLogDetail{
 		UsageLogID:          input.UsageLogID,
+		RequestID:           requestID,
+		APIKeyID:            input.APIKeyID,
 		RequestBody:         rawBytesToOptionalString(input.RequestBody),
 		RequestBytes:        normalizeObservedBytes(input.RequestBytes, input.RequestBody, nil),
 		RequestIsJSON:       input.RequestComplete && len(input.RequestBody) > 0 && json.Valid(input.RequestBody),
@@ -78,18 +96,93 @@ func (s *UsageLogDetailService) Save(ctx context.Context, input UsageLogDetailSa
 	return s.repo.Upsert(ctx, detail)
 }
 
-func (s *UsageLogDetailService) GetByUsageLogID(ctx context.Context, usageLogID int64) (*UsageLogDetail, error) {
-	if s == nil || s.repo == nil || usageLogID <= 0 {
+func (s *UsageLogDetailService) GetByUsageLog(ctx context.Context, usageLog *UsageLog) (*UsageLogDetail, error) {
+	if s == nil || s.repo == nil || usageLog == nil {
 		return nil, nil
 	}
-	return s.repo.GetByUsageLogID(ctx, usageLogID)
+
+	key := usageLogDetailKeyFromUsageLog(usageLog)
+	if key.RequestID != "" && key.APIKeyID > 0 {
+		detail, err := s.repo.GetByRequestKey(ctx, key)
+		if err != nil || detail != nil {
+			if detail != nil && detail.UsageLogID == 0 {
+				detail.UsageLogID = usageLog.ID
+			}
+			return detail, err
+		}
+	}
+	if usageLog.ID <= 0 {
+		return nil, nil
+	}
+	detail, err := s.repo.GetByUsageLogID(ctx, usageLog.ID)
+	if detail != nil && detail.UsageLogID == 0 {
+		detail.UsageLogID = usageLog.ID
+	}
+	return detail, err
 }
 
-func (s *UsageLogDetailService) BatchHasDetails(ctx context.Context, usageLogIDs []int64) (map[int64]bool, error) {
-	if s == nil || s.repo == nil || len(usageLogIDs) == 0 {
-		return map[int64]bool{}, nil
+func (s *UsageLogDetailService) BatchHasDetailsByUsageLogs(ctx context.Context, usageLogs []UsageLog) (map[int64]bool, error) {
+	result := make(map[int64]bool, len(usageLogs))
+	if s == nil || s.repo == nil || len(usageLogs) == 0 {
+		return result, nil
 	}
-	return s.repo.BatchHasDetails(ctx, usageLogIDs)
+
+	keys := make([]UsageLogDetailKey, 0, len(usageLogs))
+	logIDsByKey := make(map[UsageLogDetailKey][]int64, len(usageLogs))
+	legacyLogIDs := make([]int64, 0, len(usageLogs))
+	seen := make(map[UsageLogDetailKey]struct{}, len(usageLogs))
+	for i := range usageLogs {
+		if usageLogs[i].ID <= 0 {
+			continue
+		}
+		key := usageLogDetailKeyFromUsageLog(&usageLogs[i])
+		if key.RequestID == "" || key.APIKeyID <= 0 {
+			legacyLogIDs = append(legacyLogIDs, usageLogs[i].ID)
+			continue
+		}
+		logIDsByKey[key] = append(logIDsByKey[key], usageLogs[i].ID)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	if len(keys) > 0 {
+		found, err := s.repo.BatchHasDetailsByRequestKeys(ctx, keys)
+		if err != nil {
+			return nil, err
+		}
+		for key, logIDs := range logIDsByKey {
+			if !found[key] {
+				continue
+			}
+			for _, logID := range logIDs {
+				result[logID] = true
+			}
+		}
+	}
+	if len(legacyLogIDs) > 0 {
+		legacyFound, err := s.repo.BatchHasDetailsByUsageLogIDs(ctx, legacyLogIDs)
+		if err != nil {
+			return nil, err
+		}
+		for _, logID := range legacyLogIDs {
+			if legacyFound[logID] {
+				result[logID] = true
+			}
+		}
+	}
+	return result, nil
+}
+
+func usageLogDetailKeyFromUsageLog(usageLog *UsageLog) UsageLogDetailKey {
+	if usageLog == nil {
+		return UsageLogDetailKey{}
+	}
+	return UsageLogDetailKey{
+		RequestID: strings.TrimSpace(usageLog.RequestID),
+		APIKeyID:  usageLog.APIKeyID,
+	}
 }
 
 func rawBytesToOptionalString(raw []byte) *string {
