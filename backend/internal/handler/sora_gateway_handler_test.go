@@ -328,6 +328,9 @@ func (s *stubUsageLogRepo) GetAccountTodayStats(ctx context.Context, accountID i
 func (s *stubUsageLogRepo) GetDashboardStats(ctx context.Context) (*usagestats.DashboardStats, error) {
 	return nil, nil
 }
+func (s *stubUsageLogRepo) GetInputCacheSummary(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.InputCacheSummary, error) {
+	return &usagestats.InputCacheSummary{}, nil
+}
 func (s *stubUsageLogRepo) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) ([]usagestats.TrendDataPoint, error) {
 	return nil, nil
 }

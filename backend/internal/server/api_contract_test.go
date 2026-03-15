@@ -1616,6 +1616,10 @@ func (r *stubUsageLogRepo) GetDashboardStats(ctx context.Context) (*usagestats.D
 	return nil, errors.New("not implemented")
 }
 
+func (r *stubUsageLogRepo) GetInputCacheSummary(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.InputCacheSummary, error) {
+	return &usagestats.InputCacheSummary{}, nil
+}
+
 func (r *stubUsageLogRepo) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) ([]usagestats.TrendDataPoint, error) {
 	return nil, errors.New("not implemented")
 }
