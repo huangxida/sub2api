@@ -122,8 +122,8 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 		return
 	}
 	var payloadCapture *usagePayloadCaptureWriter
-	restorePayloadCapture := func() {}
 	if h.usageDetailCapture.Enabled {
+		var restorePayloadCapture func()
 		payloadCapture, restorePayloadCapture = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
 		defer restorePayloadCapture()
 	}
