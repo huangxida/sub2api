@@ -962,6 +962,8 @@ export interface UsageLog {
   model: string
   service_tier?: string | null
   reasoning_effort?: string | null
+  inbound_endpoint?: string | null
+  upstream_endpoint?: string | null
 
   group_id: number | null
   subscription_id: number | null
@@ -1215,6 +1217,14 @@ export interface ModelStat {
   actual_cost: number // 实际扣除
 }
 
+export interface EndpointStat {
+  endpoint: string
+  requests: number
+  total_tokens: number
+  cost: number
+  actual_cost: number
+}
+
 export interface GroupStat {
   group_id: number
   group_name: string
@@ -1409,6 +1419,8 @@ export interface AccountUsageStatsResponse {
   history: AccountUsageHistory[]
   summary: AccountUsageSummary
   models: ModelStat[]
+  endpoints: EndpointStat[]
+  upstream_endpoints: EndpointStat[]
 }
 
 // ==================== User Attribute Types ====================
