@@ -54,6 +54,10 @@ func (s *usageRepoStub) GetDashboardStatsWithRange(ctx context.Context, start, e
 	return s.stats, nil
 }
 
+func (s *usageRepoStub) GetInputCacheSummary(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.InputCacheSummary, error) {
+	return &usagestats.InputCacheSummary{}, nil
+}
+
 type dashboardCacheStub struct {
 	get       func(ctx context.Context) (string, error)
 	set       func(ctx context.Context, data string, ttl time.Duration) error

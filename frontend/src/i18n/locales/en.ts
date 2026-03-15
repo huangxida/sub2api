@@ -974,7 +974,24 @@ export default {
       spendShort: 'Spend',
       requestsShort: 'Req',
       tokensShort: 'Tok',
-      failedToLoad: 'Failed to load dashboard statistics'
+      failedToLoad: 'Failed to load dashboard statistics',
+      inputCacheRatio: {
+        title: 'Daily Cache Hit Rate',
+        description: 'Model-side cache hit rate for the selected time range.',
+        windowLabel: 'Current Window',
+        windowSubtitle: 'Selected time range',
+        cumulativeLabel: 'Cumulative Hit Rate',
+        allLabel: 'All Time',
+        cumulativeSubtitle: 'All available history',
+        todayCacheHitTokensTitle: 'Daily Cache Hit Tokens',
+        cumulativeCacheHitTokensLabel: 'Cumulative Hit Tokens',
+        cacheReadLabel: 'Cache Hit Tokens',
+        cacheCreationLabel: 'Cache Creation Tokens',
+        inputVolume: 'Input Volume',
+        totalVolume: 'Total Tokens',
+        noSamples: 'No cache samples yet',
+        partialHint: 'Partially based on currently available history'
+      }
     },
 
     backup: {
@@ -3238,6 +3255,12 @@ export default {
       avgTps: 'Avg TPS',
       avgLatency: 'Avg Request Duration',
       avgTtft: 'Avg TTFT',
+      inputCacheRatio: {
+        cardLabel: 'CACHE HIT',
+        summary: 'Cum {cumulative} / Hit {cacheReadTokens}',
+        noSamples: 'No samples',
+        partialShort: 'Partial data'
+      },
       exceptions: 'Exceptions',
       requestErrors: 'Request Errors',
       errorCount: 'Error Count',
@@ -3943,6 +3966,8 @@ export default {
         memory: 'Memory usage, including used and total available memory.',
         db: 'Database connection pool status, including active, idle, and waiting connections.',
         redis: 'Redis connection pool status, showing active and idle connections.',
+        inputCacheRatio:
+          'Model-side cache hit rate computed as cache_read_tokens / (input_tokens + cache_read_tokens).',
         jobs: 'Background job execution status, including last run time, success time, and error information.',
         qps: 'Queries Per Second (QPS) and Tokens Per Second (TPS), real-time system throughput.',
         tokens: 'Total number of tokens processed in the current time window.',

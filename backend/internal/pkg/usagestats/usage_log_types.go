@@ -190,6 +190,14 @@ type UsageStats struct {
 	AverageDurationMs float64  `json:"average_duration_ms"`
 }
 
+// InputCacheSummary represents model-side input cache totals.
+type InputCacheSummary struct {
+	InputTokens         int64 `json:"input_tokens"`
+	OutputTokens        int64 `json:"output_tokens"`
+	CacheReadTokens     int64 `json:"cache_read_tokens"`
+	CacheCreationTokens int64 `json:"cache_creation_tokens"`
+}
+
 // BatchUserUsageStats represents usage stats for a single user
 type BatchUserUsageStats struct {
 	UserID          int64   `json:"user_id"`

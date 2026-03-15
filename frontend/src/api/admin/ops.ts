@@ -5,7 +5,7 @@
  */
 
 import { apiClient } from '../client'
-import type { PaginatedResponse } from '@/types'
+import type { InputCacheMetrics, PaginatedResponse } from '@/types'
 
 export type OpsRetryMode = 'client' | 'upstream'
 export type OpsQueryMode = 'auto' | 'raw' | 'preagg'
@@ -100,6 +100,7 @@ export interface OpsDashboardOverview {
   request_count_sla: number
 
   token_consumed: number
+  input_cache_metrics?: InputCacheMetrics
 
   sla: number
   error_rate: number

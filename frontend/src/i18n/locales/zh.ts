@@ -996,7 +996,24 @@ export default {
       configureAiAccounts: '配置 AI 平台账号',
       systemSettings: '系统设置',
       configureSystem: '配置系统设置',
-      failedToLoad: '加载仪表盘数据失败'
+      failedToLoad: '加载仪表盘数据失败',
+      inputCacheRatio: {
+        title: '当日缓存命中率',
+        description: '当前筛选时间范围内的模型侧缓存命中率',
+        windowLabel: '当前窗口',
+        windowSubtitle: '当前筛选范围',
+        cumulativeLabel: '累计命中率',
+        allLabel: '全部命中率',
+        cumulativeSubtitle: '全量可用历史',
+        todayCacheHitTokensTitle: '当日缓存命中 Token',
+        cumulativeCacheHitTokensLabel: '累计命中 Token',
+        cacheReadLabel: '缓存命中 Token',
+        cacheCreationLabel: '缓存创建 Token',
+        inputVolume: '输入总量',
+        totalVolume: '总 Token',
+        noSamples: '暂无缓存样本',
+        partialHint: '仅基于当前可用历史数据'
+      }
     },
 
     backup: {
@@ -3406,6 +3423,12 @@ export default {
       avgTps: '平均 TPS',
       avgLatency: '平均请求时长',
       avgTtft: '平均首 Token 延迟',
+      inputCacheRatio: {
+        cardLabel: '缓存命中',
+        summary: '累计 {cumulative} / 命中 {cacheReadTokens}',
+        noSamples: '暂无样本',
+        partialShort: '部分历史'
+      },
       exceptions: '异常数',
       requestErrors: '请求错误',
       errorCount: '错误数',
@@ -4118,6 +4141,7 @@ export default {
         memory: '内存使用率，包括已使用和总可用内存。',
         db: '数据库连接池状态，包括活跃连接、空闲连接和等待连接数。',
         redis: 'Redis 连接池状态，显示活跃和空闲的连接数。',
+        inputCacheRatio: '模型侧缓存命中率：cache_read_tokens / (input_tokens + cache_read_tokens)。',
         jobs: '后台任务执行状态，包括最近运行时间、成功时间和错误信息。',
         qps: '每秒查询数（QPS）和每秒Token数（TPS），实时显示系统吞吐量。',
         tokens: '当前时间窗口内处理的总Token数量。',

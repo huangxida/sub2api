@@ -7,8 +7,8 @@
       </div>
 
       <template v-else-if="stats">
-        <!-- Row 1: Core Stats -->
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <!-- Summary Cards -->
+        <div class="grid grid-cols-2 gap-4 lg:grid-cols-5">
           <!-- Total API Keys -->
           <div class="card p-4">
             <div class="flex items-center gap-3">
@@ -93,10 +93,6 @@
               </div>
             </div>
           </div>
-        </div>
-
-        <!-- Row 2: Token Stats -->
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
           <!-- Today Tokens -->
           <div class="card p-4">
             <div class="flex items-center gap-3">
@@ -202,6 +198,52 @@
               </div>
             </div>
           </div>
+
+          <div class="card p-4">
+            <div class="flex items-center gap-3">
+              <div class="rounded-lg bg-cyan-100 p-2 dark:bg-cyan-900/30">
+                <Icon name="database" size="md" class="text-cyan-600 dark:text-cyan-400" :stroke-width="2" />
+              </div>
+              <div>
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
+                  {{ t('admin.dashboard.inputCacheRatio.title') }}
+                </p>
+                <p class="text-xl font-bold text-gray-900 dark:text-white">
+                  {{ inputCacheTodayRatioLabel }}
+                </p>
+                <p class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
+                  {{
+                    inputCacheTodayHasData
+                      ? `${t('admin.dashboard.inputCacheRatio.cumulativeLabel')}: ${inputCacheCumulativeRatioLabel}`
+                      : t('admin.dashboard.inputCacheRatio.noSamples')
+                  }}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card p-4">
+            <div class="flex items-center gap-3">
+              <div class="rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30">
+                <Icon name="cube" size="md" class="text-amber-600 dark:text-amber-400" :stroke-width="2" />
+              </div>
+              <div>
+                <p class="text-xs font-medium text-gray-500 dark:text-gray-400">
+                  {{ t('admin.dashboard.inputCacheRatio.todayCacheHitTokensTitle') }}
+                </p>
+                <p class="text-xl font-bold text-gray-900 dark:text-white">
+                  {{ formatTokens(inputCacheTodayTotalCacheTokens) }}
+                </p>
+                <p class="whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
+                  {{
+                    inputCacheTodayHasData
+                      ? `${t('admin.dashboard.inputCacheRatio.cumulativeCacheHitTokensLabel')}: ${formatTokens(inputCacheCumulativeTotalCacheTokens)}`
+                      : t('admin.dashboard.inputCacheRatio.noSamples')
+                  }}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Charts Section -->
@@ -278,15 +320,14 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
-
-const { t } = useI18n()
 import { adminAPI } from '@/api/admin'
 import type {
   DashboardStats,
   TrendDataPoint,
   ModelStat,
   UserUsageTrendPoint,
-  UserSpendingRankingItem
+  UserSpendingRankingItem,
+  InputCacheMetrics
 } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -308,6 +349,8 @@ import {
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
 
+const { t } = useI18n()
+
 // Register Chart.js components
 ChartJS.register(
   CategoryScale,
@@ -327,6 +370,7 @@ const chartsLoading = ref(false)
 const userTrendLoading = ref(false)
 const rankingLoading = ref(false)
 const rankingError = ref(false)
+const inputCacheMetrics = ref<InputCacheMetrics | null>(null)
 
 // Chart data
 const trendData = ref<TrendDataPoint[]>([])
@@ -345,11 +389,45 @@ const formatLocalDate = (date: Date): string => {
 }
 
 const getTodayLocalDate = () => formatLocalDate(new Date())
+const getLocalDateOffset = (offsetDays: number) => {
+  const date = new Date()
+  date.setDate(date.getDate() + offsetDays)
+  return formatLocalDate(date)
+}
 
 // Date range
 const granularity = ref<'day' | 'hour'>('day')
-const startDate = ref(getTodayLocalDate())
+const startDate = ref(getLocalDateOffset(-29))
 const endDate = ref(getTodayLocalDate())
+
+const inputCacheCumulative = computed(() => inputCacheMetrics.value?.cumulative ?? null)
+const inputCacheTodayHasData = computed(() => {
+  return ((stats.value?.today_input_tokens ?? 0)
+    + (stats.value?.today_output_tokens ?? 0)
+    + (stats.value?.today_cache_creation_tokens ?? 0)
+    + (stats.value?.today_cache_read_tokens ?? 0)) > 0
+})
+const inputCacheTodayRatioLabel = computed(() => {
+  return formatPercentage(
+    computeCacheHitRate(
+      stats.value?.today_input_tokens,
+      stats.value?.today_output_tokens,
+      stats.value?.today_cache_creation_tokens,
+      stats.value?.today_cache_read_tokens
+    )
+  )
+})
+const inputCacheCumulativeRatioLabel = computed(() => {
+  return formatPercentage(inputCacheCumulative.value?.cache_read_ratio)
+})
+const inputCacheTodayTotalCacheTokens = computed(() => {
+  return (stats.value?.today_cache_creation_tokens ?? 0) + (stats.value?.today_cache_read_tokens ?? 0)
+})
+const inputCacheCumulativeTotalCacheTokens = computed(() => {
+  return inputCacheCumulative.value?.total_cache_tokens
+    ?? ((inputCacheCumulative.value?.cache_creation_tokens ?? 0)
+      + (inputCacheCumulative.value?.cache_read_tokens ?? 0))
+})
 
 // Granularity options for Select component
 const granularityOptions = computed(() => [
@@ -508,6 +586,27 @@ const formatNumber = (value: number): string => {
   return value.toLocaleString()
 }
 
+const formatPercentage = (value: number | null | undefined): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return '-'
+  }
+  return `${value.toFixed(2)}%`
+}
+
+const computeCacheHitRate = (
+  inputTokens: number | null | undefined,
+  outputTokens: number | null | undefined,
+  cacheCreationTokens: number | null | undefined,
+  cacheReadTokens: number | null | undefined
+): number | null => {
+  const totalCacheTokens = (cacheCreationTokens ?? 0) + (cacheReadTokens ?? 0)
+  const totalTokens = (inputTokens ?? 0) + (outputTokens ?? 0) + totalCacheTokens
+  if (totalTokens <= 0) {
+    return null
+  }
+  return Math.round((totalCacheTokens / totalTokens) * 10000) / 100
+}
+
 const formatCost = (value: number): string => {
   if (value >= 1000) {
     return (value / 1000).toFixed(2) + 'K'
@@ -580,6 +679,7 @@ const loadDashboardSnapshot = async (includeStats: boolean) => {
     if (includeStats && response.stats) {
       stats.value = response.stats
     }
+    inputCacheMetrics.value = response.input_cache_metrics || null
     trendData.value = response.trend || []
     modelStats.value = response.models || []
   } catch (error) {

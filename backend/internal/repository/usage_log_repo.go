@@ -3083,6 +3083,71 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 	return stats, nil
 }
 
+func (r *usageLogRepository) GetInputCacheSummary(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.InputCacheSummary, error) {
+	conditions := make([]string, 0, 8)
+	args := make([]any, 0, 8)
+
+	if filters.UserID > 0 {
+		conditions = append(conditions, fmt.Sprintf("user_id = $%d", len(args)+1))
+		args = append(args, filters.UserID)
+	}
+	if filters.APIKeyID > 0 {
+		conditions = append(conditions, fmt.Sprintf("api_key_id = $%d", len(args)+1))
+		args = append(args, filters.APIKeyID)
+	}
+	if filters.AccountID > 0 {
+		conditions = append(conditions, fmt.Sprintf("account_id = $%d", len(args)+1))
+		args = append(args, filters.AccountID)
+	}
+	if filters.GroupID > 0 {
+		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
+		args = append(args, filters.GroupID)
+	}
+	if filters.Model != "" {
+		conditions = append(conditions, fmt.Sprintf("model = $%d", len(args)+1))
+		args = append(args, filters.Model)
+	}
+	conditions, args = appendRequestTypeOrStreamWhereCondition(conditions, args, filters.RequestType, filters.Stream)
+	if filters.BillingType != nil {
+		conditions = append(conditions, fmt.Sprintf("billing_type = $%d", len(args)+1))
+		args = append(args, int16(*filters.BillingType))
+	}
+	if filters.StartTime != nil {
+		conditions = append(conditions, fmt.Sprintf("created_at >= $%d", len(args)+1))
+		args = append(args, filters.StartTime.UTC())
+	}
+	if filters.EndTime != nil {
+		conditions = append(conditions, fmt.Sprintf("created_at < $%d", len(args)+1))
+		args = append(args, filters.EndTime.UTC())
+	}
+
+	query := fmt.Sprintf(`
+		SELECT
+			COALESCE(SUM(input_tokens), 0) as input_tokens,
+			COALESCE(SUM(output_tokens), 0) as output_tokens,
+			COALESCE(SUM(cache_read_tokens), 0) as cache_read_tokens,
+			COALESCE(SUM(cache_creation_tokens), 0) as cache_creation_tokens
+		FROM usage_logs
+		%s
+	`, buildWhere(conditions))
+
+	summary := &usagestats.InputCacheSummary{}
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		query,
+		args,
+		&summary.InputTokens,
+		&summary.OutputTokens,
+		&summary.CacheReadTokens,
+		&summary.CacheCreationTokens,
+	); err != nil {
+		return nil, err
+	}
+
+	return summary, nil
+}
+
 // AccountUsageHistory represents daily usage history for an account
 type AccountUsageHistory = usagestats.AccountUsageHistory
 

@@ -1153,6 +1153,29 @@ export interface DashboardStats {
   tpm: number // 近5分钟平均每分钟Token数
 }
 
+export interface InputCacheMetricsSnapshot {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  cache_read_ratio: number | null
+  total_cache_tokens: number
+  total_tokens: number
+  has_data: boolean
+  partial: boolean
+  available_from?: string | null
+}
+
+export interface InputCacheMetricsWindow extends InputCacheMetricsSnapshot {
+  start_time: string
+  end_time: string
+}
+
+export interface InputCacheMetrics {
+  cumulative?: InputCacheMetricsSnapshot | null
+  window?: InputCacheMetricsWindow | null
+}
+
 export interface UsageStatsResponse {
   period?: string
   total_requests: number
