@@ -962,6 +962,8 @@ export interface UsageLog {
   model: string
   service_tier?: string | null
   reasoning_effort?: string | null
+  inbound_endpoint?: string | null
+  upstream_endpoint?: string | null
 
   group_id: number | null
   subscription_id: number | null
@@ -1153,6 +1155,29 @@ export interface DashboardStats {
   tpm: number // 近5分钟平均每分钟Token数
 }
 
+export interface InputCacheMetricsSnapshot {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  cache_read_ratio: number | null
+  total_cache_tokens: number
+  total_tokens: number
+  has_data: boolean
+  partial: boolean
+  available_from?: string | null
+}
+
+export interface InputCacheMetricsWindow extends InputCacheMetricsSnapshot {
+  start_time: string
+  end_time: string
+}
+
+export interface InputCacheMetrics {
+  cumulative?: InputCacheMetricsSnapshot | null
+  window?: InputCacheMetricsWindow | null
+}
+
 export interface UsageStatsResponse {
   period?: string
   total_requests: number
@@ -1190,6 +1215,14 @@ export interface ModelStat {
   total_tokens: number
   cost: number // 标准计费
   actual_cost: number // 实际扣除
+}
+
+export interface EndpointStat {
+  endpoint: string
+  requests: number
+  total_tokens: number
+  cost: number
+  actual_cost: number
 }
 
 export interface GroupStat {
@@ -1386,6 +1419,8 @@ export interface AccountUsageStatsResponse {
   history: AccountUsageHistory[]
   summary: AccountUsageSummary
   models: ModelStat[]
+  endpoints: EndpointStat[]
+  upstream_endpoints: EndpointStat[]
 }
 
 // ==================== User Attribute Types ====================

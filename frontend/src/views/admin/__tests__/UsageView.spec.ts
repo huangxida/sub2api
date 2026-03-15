@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getById } = vi.hoisted(() => {
+const { list, getStats, getSnapshotV2, getById, route } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -15,6 +15,9 @@ const { list, getStats, getSnapshotV2, getById } = vi.hoisted(() => {
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
     getById: vi.fn(),
+    route: {
+      query: {} as Record<string, unknown>,
+    },
   }
 })
 
@@ -45,6 +48,10 @@ vi.mock('@/api/admin/usage', () => ({
   },
 }))
 
+vi.mock('vue-router', () => ({
+  useRoute: () => route,
+}))
+
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: vi.fn(),
@@ -69,7 +76,15 @@ vi.mock('vue-i18n', async () => {
 })
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
-const UsageFiltersStub = { template: '<div><slot name="after-reset" /></div>' }
+const UsageFiltersStub = {
+  emits: ['reset'],
+  template: `
+    <div>
+      <button data-test="reset-filters" @click="$emit('reset')">reset</button>
+      <slot name="after-reset" />
+    </div>
+  `,
+}
 const ModelDistributionChartStub = {
   props: ['metric'],
   emits: ['update:metric'],
@@ -91,13 +106,57 @@ const GroupDistributionChartStub = {
   `,
 }
 
+const FIXED_NOW = new Date(2026, 2, 15, 12, 0, 0)
+const DEFAULT_DATE_RANGE = {
+  start_date: '2026-02-14',
+  end_date: '2026-03-15',
+}
+
+const mountUsageView = async () => {
+  const wrapper = mount(UsageView, {
+    global: {
+      stubs: {
+        AppLayout: AppLayoutStub,
+        UsageStatsCards: true,
+        UsageFilters: UsageFiltersStub,
+        UsageTable: true,
+        UsageExportProgress: true,
+        UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true,
+        Pagination: true,
+        Select: true,
+        Icon: true,
+        TokenUsageTrend: true,
+        EndpointDistributionChart: true,
+        ModelDistributionChart: ModelDistributionChartStub,
+        GroupDistributionChart: GroupDistributionChartStub,
+      },
+    },
+  })
+
+  vi.advanceTimersByTime(120)
+  await flushPromises()
+  return wrapper
+}
+
+const expectRequestsToUseDateRange = (expected: { start_date: string; end_date: string }) => {
+  expect(list).toHaveBeenLastCalledWith(
+    expect.objectContaining(expected),
+    expect.objectContaining({ signal: expect.any(Object) })
+  )
+  expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining(expected))
+  expect(getSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining(expected))
+}
+
 describe('admin UsageView distribution metric toggles', () => {
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.setSystemTime(FIXED_NOW)
     list.mockReset()
     getStats.mockReset()
     getSnapshotV2.mockReset()
     getById.mockReset()
+    route.query = {}
 
     list.mockResolvedValue({
       items: [],
@@ -125,29 +184,56 @@ describe('admin UsageView distribution metric toggles', () => {
     vi.useRealTimers()
   })
 
-  it('keeps model and group metric toggles independent without refetching chart data', async () => {
-    const wrapper = mount(UsageView, {
-      global: {
-        stubs: {
-          AppLayout: AppLayoutStub,
-          UsageStatsCards: true,
-          UsageFilters: UsageFiltersStub,
-          UsageTable: true,
-          UsageExportProgress: true,
-          UsageCleanupDialog: true,
-          UserBalanceHistoryModal: true,
-          Pagination: true,
-          Select: true,
-          Icon: true,
-          TokenUsageTrend: true,
-          ModelDistributionChart: ModelDistributionChartStub,
-          GroupDistributionChart: GroupDistributionChartStub,
-        },
-      },
-    })
+  it('loads the admin usage page with the last 30 days by default', async () => {
+    await mountUsageView()
 
-    vi.advanceTimersByTime(120)
+    expectRequestsToUseDateRange(DEFAULT_DATE_RANGE)
+  })
+
+  it('resets filters back to the last 30 days range', async () => {
+    const wrapper = await mountUsageView()
+
+    list.mockClear()
+    getStats.mockClear()
+    getSnapshotV2.mockClear()
+
+    await wrapper.find('[data-test="reset-filters"]').trigger('click')
     await flushPromises()
+
+    expectRequestsToUseDateRange(DEFAULT_DATE_RANGE)
+  })
+
+  it('keeps explicit route query dates instead of overriding them with the default range', async () => {
+    route.query = {
+      start_date: '2026-03-01',
+      end_date: '2026-03-02',
+      user_id: '42',
+    }
+
+    await mountUsageView()
+
+    expect(list).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        start_date: '2026-03-01',
+        end_date: '2026-03-02',
+        user_id: 42,
+      }),
+      expect.objectContaining({ signal: expect.any(Object) })
+    )
+    expect(getStats).toHaveBeenLastCalledWith(expect.objectContaining({
+      start_date: '2026-03-01',
+      end_date: '2026-03-02',
+      user_id: 42,
+    }))
+    expect(getSnapshotV2).toHaveBeenLastCalledWith(expect.objectContaining({
+      start_date: '2026-03-01',
+      end_date: '2026-03-02',
+      user_id: 42,
+    }))
+  })
+
+  it('keeps model and group metric toggles independent without refetching chart data', async () => {
+    const wrapper = await mountUsageView()
 
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
 

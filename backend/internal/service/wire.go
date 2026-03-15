@@ -342,12 +342,35 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	return svc
 }
 
+// ProvideConfiguredAPIKeyService restores post-construction cache invalidation wiring.
+func ProvideConfiguredAPIKeyService(
+	apiKeyRepo APIKeyRepository,
+	userRepo UserRepository,
+	groupRepo GroupRepository,
+	subRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	apiKeyCache APIKeyCache,
+	billingCache BillingCache,
+	cfg *config.Config,
+) *APIKeyService {
+	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, subRepo, userGroupRateRepo, apiKeyCache, cfg)
+	svc.SetRateLimitCacheInvalidator(billingCache)
+	return svc
+}
+
+// ProvideConfiguredSoraS3Storage re-registers live S3 client refresh on settings updates.
+func ProvideConfiguredSoraS3Storage(settingService *SettingService) *SoraS3Storage {
+	svc := NewSoraS3Storage(settingService)
+	settingService.SetOnS3UpdateCallback(svc.RefreshClient)
+	return svc
+}
+
 // ProviderSet is the Wire provider set for all services
 var ProviderSet = wire.NewSet(
 	// Core services
 	NewAuthService,
 	NewUserService,
-	NewAPIKeyService,
+	ProvideConfiguredAPIKeyService,
 	ProvideAPIKeyAuthCacheInvalidator,
 	NewGroupService,
 	NewAccountService,
@@ -364,7 +387,7 @@ var ProviderSet = wire.NewSet(
 	NewAdminService,
 	NewGatewayService,
 	ProvideSoraMediaStorage,
-	NewSoraS3Storage,
+	ProvideConfiguredSoraS3Storage,
 	ProvideSoraMediaCleanupService,
 	ProvideSoraSDKClient,
 	wire.Bind(new(SoraClient), new(*SoraSDKClient)),

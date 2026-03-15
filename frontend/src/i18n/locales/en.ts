@@ -718,6 +718,13 @@ export default {
     preparingExport: 'Preparing export...',
     model: 'Model',
     reasoningEffort: 'Reasoning Effort',
+    endpoint: 'Endpoint',
+    endpointDistribution: 'Endpoint Distribution',
+    inbound: 'Inbound',
+    upstream: 'Upstream',
+    path: 'Path',
+    inboundEndpoint: 'Inbound Endpoint',
+    upstreamEndpoint: 'Upstream Endpoint',
     type: 'Type',
     tokens: 'Tokens',
     cost: 'Cost',
@@ -974,7 +981,24 @@ export default {
       spendShort: 'Spend',
       requestsShort: 'Req',
       tokensShort: 'Tok',
-      failedToLoad: 'Failed to load dashboard statistics'
+      failedToLoad: 'Failed to load dashboard statistics',
+      inputCacheRatio: {
+        title: 'Daily Cache Hit Rate',
+        description: 'Model-side cache hit rate for the selected time range.',
+        windowLabel: 'Current Window',
+        windowSubtitle: 'Selected time range',
+        cumulativeLabel: 'Cumulative Hit Rate',
+        allLabel: 'All Time',
+        cumulativeSubtitle: 'All available history',
+        todayCacheHitTokensTitle: 'Daily Cache Hit Tokens',
+        cumulativeCacheHitTokensLabel: 'Cumulative Hit Tokens',
+        cacheReadLabel: 'Cache Hit Tokens',
+        cacheCreationLabel: 'Cache Creation Tokens',
+        inputVolume: 'Input Volume',
+        totalVolume: 'Total Tokens',
+        noSamples: 'No cache samples yet',
+        partialHint: 'Partially based on currently available history'
+      }
     },
 
     backup: {
@@ -3238,6 +3262,12 @@ export default {
       avgTps: 'Avg TPS',
       avgLatency: 'Avg Request Duration',
       avgTtft: 'Avg TTFT',
+      inputCacheRatio: {
+        cardLabel: 'CACHE HIT',
+        summary: 'Cum {cumulative} / Hit {cacheReadTokens}',
+        noSamples: 'No samples',
+        partialShort: 'Partial data'
+      },
       exceptions: 'Exceptions',
       requestErrors: 'Request Errors',
       errorCount: 'Error Count',
@@ -3872,6 +3902,8 @@ export default {
         ignoreNoAvailableAccountsHint: 'When enabled, "No available accounts" errors will not be written to the error log (not recommended; usually a config issue).',
         ignoreInvalidApiKeyErrors: 'Ignore invalid API key errors',
         ignoreInvalidApiKeyErrorsHint: 'When enabled, invalid or missing API key errors (INVALID_API_KEY, API_KEY_REQUIRED) will not be written to the error log.',
+        ignoreInsufficientBalanceErrors: 'Ignore Insufficient Balance Errors',
+        ignoreInsufficientBalanceErrorsHint: 'When enabled, insufficient account balance errors will not be written to the error log.',
         autoRefresh: 'Auto Refresh',
         enableAutoRefresh: 'Enable auto refresh',
         enableAutoRefreshHint: 'Automatically refresh dashboard data at a fixed interval.',
@@ -3943,6 +3975,8 @@ export default {
         memory: 'Memory usage, including used and total available memory.',
         db: 'Database connection pool status, including active, idle, and waiting connections.',
         redis: 'Redis connection pool status, showing active and idle connections.',
+        inputCacheRatio:
+          'Model-side cache hit rate computed as cache_read_tokens / (input_tokens + cache_read_tokens).',
         jobs: 'Background job execution status, including last run time, success time, and error information.',
         qps: 'Queries Per Second (QPS) and Tokens Per Second (TPS), real-time system throughput.',
         tokens: 'Total number of tokens processed in the current time window.',
@@ -3996,6 +4030,9 @@ export default {
         invitationCodeHint: 'When enabled, users must enter a valid invitation code to register',
         passwordReset: 'Password Reset',
         passwordResetHint: 'Allow users to reset their password via email',
+        frontendUrl: 'Frontend URL',
+        frontendUrlPlaceholder: 'https://example.com',
+        frontendUrlHint: 'Used to generate password reset links in emails. Example: https://example.com',
         totp: 'Two-Factor Authentication (2FA)',
         totpHint: 'Allow users to use authenticator apps like Google Authenticator',
         totpKeyNotConfigured:

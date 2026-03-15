@@ -9,7 +9,7 @@ import { adminAPI } from '@/api'
 import { opsAPI, type OpsDashboardOverview, type OpsMetricThresholds, type OpsRealtimeTrafficSummary } from '@/api/admin/ops'
 import type { OpsRequestDetailsPreset } from './OpsRequestDetailsModal.vue'
 import { useAdminSettingsStore } from '@/stores'
-import { formatNumber } from '@/utils/format'
+import { formatNumber, formatTokensK } from '@/utils/format'
 
 type RealtimeWindow = '1min' | '5min' | '30min' | '1h'
 
@@ -54,6 +54,9 @@ const realtimeWindow = ref<RealtimeWindow>('1min')
 
 const overview = computed(() => props.overview ?? null)
 const systemMetrics = computed(() => overview.value?.system_metrics ?? null)
+const inputCacheMetrics = computed(() => overview.value?.input_cache_metrics ?? null)
+const inputCacheWindow = computed(() => inputCacheMetrics.value?.window ?? null)
+const inputCacheCumulative = computed(() => inputCacheMetrics.value?.cumulative ?? null)
 
 const REALTIME_WINDOW_MINUTES: Record<RealtimeWindow, number> = {
   '1min': 1,
@@ -276,6 +279,35 @@ function getThresholdColorClass(level: ThresholdLevel): string {
 
 const totalRequestsLabel = computed(() => formatNumber(overview.value?.request_count_total ?? 0))
 const totalTokensLabel = computed(() => formatNumber(overview.value?.token_consumed ?? 0))
+const inputCacheHasData = computed(() => {
+  return Boolean(inputCacheWindow.value?.has_data || inputCacheCumulative.value?.has_data)
+})
+const inputCachePartial = computed(() => {
+  return Boolean(inputCacheWindow.value?.partial || inputCacheCumulative.value?.partial)
+})
+const inputCacheHitTokensLabel = computed(() => {
+  const totalCacheTokens = inputCacheWindow.value?.total_cache_tokens
+    ?? ((inputCacheWindow.value?.cache_creation_tokens ?? 0) + (inputCacheWindow.value?.cache_read_tokens ?? 0))
+  if (typeof totalCacheTokens !== 'number' || !Number.isFinite(totalCacheTokens)) return '0'
+  return formatTokensK(totalCacheTokens)
+})
+
+function formatRatioLabel(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-'
+  return `${value.toFixed(2)}%`
+}
+
+const inputCacheWindowRatioLabel = computed(() => formatRatioLabel(inputCacheWindow.value?.cache_read_ratio))
+const inputCacheCumulativeRatioLabel = computed(() => formatRatioLabel(inputCacheCumulative.value?.cache_read_ratio))
+const inputCacheWindowRatioClass = computed(() => {
+  const value = inputCacheWindow.value?.cache_read_ratio
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return 'text-gray-900 dark:text-white'
+  }
+  if (value >= 80) return 'text-emerald-600 dark:text-emerald-400'
+  if (value >= 50) return 'text-yellow-600 dark:text-yellow-400'
+  return 'text-rose-600 dark:text-rose-400'
+})
 
 const realtimeTrafficSummary = ref<OpsRealtimeTrafficSummary | null>(null)
 const realtimeTrafficLoading = ref(false)
@@ -1433,7 +1465,36 @@ function handleToolbarRefresh() {
 
     <!-- Integrated: System health (cards) -->
     <div v-if="overview" class="mt-2 border-t border-gray-100 pt-4 dark:border-dark-700">
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-7">
+        <!-- Input Cache -->
+        <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">
+          <div class="flex items-center gap-1">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              {{ t('admin.ops.inputCacheRatio.cardLabel') }}
+            </div>
+            <HelpTooltip v-if="!props.fullscreen" :content="t('admin.ops.tooltips.inputCacheRatio')" />
+          </div>
+          <div class="mt-1 text-lg font-black" :class="inputCacheWindowRatioClass">
+            {{ inputCacheWindowRatioLabel }}
+          </div>
+          <div v-if="!props.fullscreen" class="mt-1 text-[10px] text-gray-500 dark:text-gray-400">
+            {{
+              inputCacheHasData
+                ? t('admin.ops.inputCacheRatio.summary', {
+                    cumulative: inputCacheCumulativeRatioLabel,
+                    cacheReadTokens: inputCacheHitTokensLabel
+                  })
+                : t('admin.ops.inputCacheRatio.noSamples')
+            }}
+          </div>
+          <div
+            v-if="!props.fullscreen && inputCachePartial"
+            class="mt-1 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+          >
+            {{ t('admin.ops.inputCacheRatio.partialShort') }}
+          </div>
+        </div>
+
         <!-- CPU -->
         <div class="rounded-xl bg-gray-50 p-3 dark:bg-dark-900">
           <div class="flex items-center gap-1">

@@ -35,6 +35,8 @@ type OpsDashboardOverview struct {
 	Platform  string    `json:"platform"`
 	GroupID   *int64    `json:"group_id"`
 
+	InputCacheMetrics *InputCacheMetrics `json:"input_cache_metrics,omitempty"`
+
 	// HealthScore is a backend-computed overall health score (0-100).
 	// It is derived from the monitored metrics in this overview, plus best-effort system metrics/job heartbeats.
 	HealthScore int `json:"health_score"`

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 )
 
 // opsRepoMock is a test-only OpsRepository implementation with optional function hooks.
@@ -95,6 +97,10 @@ func (m *opsRepoMock) GetWindowStats(ctx context.Context, filter *OpsDashboardFi
 
 func (m *opsRepoMock) GetRealtimeTrafficSummary(ctx context.Context, filter *OpsDashboardFilter) (*OpsRealtimeTrafficSummary, error) {
 	return &OpsRealtimeTrafficSummary{}, nil
+}
+
+func (m *opsRepoMock) GetInputCacheSummary(ctx context.Context, filter *OpsDashboardFilter) (*usagestats.InputCacheSummary, error) {
+	return &usagestats.InputCacheSummary{}, nil
 }
 
 func (m *opsRepoMock) GetDashboardOverview(ctx context.Context, filter *OpsDashboardFilter) (*OpsDashboardOverview, error) {

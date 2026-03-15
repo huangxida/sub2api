@@ -16,7 +16,8 @@ import (
 )
 
 type OpsHandler struct {
-	opsService *service.OpsService
+	opsService       *service.OpsService
+	dashboardService *service.DashboardService
 }
 
 // GetErrorLogByID returns ops error log detail.
@@ -70,8 +71,11 @@ func parseOpsViewParam(c *gin.Context) string {
 	}
 }
 
-func NewOpsHandler(opsService *service.OpsService) *OpsHandler {
-	return &OpsHandler{opsService: opsService}
+func NewOpsHandler(opsService *service.OpsService, dashboardService *service.DashboardService) *OpsHandler {
+	return &OpsHandler{
+		opsService:       opsService,
+		dashboardService: dashboardService,
+	}
 }
 
 // GetErrorLogs lists ops error logs.

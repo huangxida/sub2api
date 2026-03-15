@@ -5,7 +5,7 @@
  */
 
 import { apiClient } from '../client'
-import type { PaginatedResponse } from '@/types'
+import type { InputCacheMetrics, PaginatedResponse } from '@/types'
 
 export type OpsRetryMode = 'client' | 'upstream'
 export type OpsQueryMode = 'auto' | 'raw' | 'preagg'
@@ -100,6 +100,7 @@ export interface OpsDashboardOverview {
   request_count_sla: number
 
   token_consumed: number
+  input_cache_metrics?: InputCacheMetrics
 
   sla: number
   error_rate: number
@@ -841,6 +842,7 @@ export interface OpsAdvancedSettings {
   ignore_context_canceled: boolean
   ignore_no_available_accounts: boolean
   ignore_invalid_api_key_errors: boolean
+  ignore_insufficient_balance_errors: boolean
   display_openai_token_stats: boolean
   display_alert_events: boolean
   auto_refresh_enabled: boolean

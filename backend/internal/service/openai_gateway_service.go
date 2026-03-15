@@ -1326,7 +1326,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 		return nil, err
 	}
 	if len(accounts) == 0 {
-		return nil, errors.New("no available accounts")
+		return nil, ErrNoAvailableAccounts
 	}
 
 	isExcluded := func(accountID int64) bool {
@@ -1396,7 +1396,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	if len(candidates) == 0 {
-		return nil, errors.New("no available accounts")
+		return nil, ErrNoAvailableAccounts
 	}
 
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
@@ -1503,7 +1503,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 		}, nil
 	}
 
-	return nil, errors.New("no available accounts")
+	return nil, ErrNoAvailableAccounts
 }
 
 func (s *OpenAIGatewayService) listSchedulableAccounts(ctx context.Context, groupID *int64) ([]Account, error) {
@@ -4042,6 +4042,8 @@ type OpenAIRecordUsageInput struct {
 	User                *User
 	Account             *Account
 	Subscription        *UserSubscription
+	InboundEndpoint     string
+	UpstreamEndpoint    string
 	UserAgent           string // 请求的 User-Agent
 	IPAddress           string // 请求的客户端 IP 地址
 	RequestBody         []byte
@@ -4129,6 +4131,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		Model:                 billingModel,
 		ServiceTier:           result.ServiceTier,
 		ReasoningEffort:       result.ReasoningEffort,
+		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
+		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),
 		InputTokens:           actualInputTokens,
 		OutputTokens:          result.Usage.OutputTokens,
 		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
@@ -4148,7 +4152,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		FirstTokenMs:          result.FirstTokenMs,
 		CreatedAt:             time.Now(),
 	}
-
 	// 添加 UserAgent
 	if input.UserAgent != "" {
 		usageLog.UserAgent = &input.UserAgent
@@ -4750,4 +4753,12 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 		// Only store known effort levels for now to keep UI consistent.
 		return ""
 	}
+}
+
+func optionalTrimmedStringPtr(raw string) *string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }

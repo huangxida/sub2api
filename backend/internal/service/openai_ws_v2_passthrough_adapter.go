@@ -356,6 +356,17 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		relayResult.DroppedDownstreamFrames,
 		turnCount,
 	)
+	if shouldTreatPassthroughClientDisconnectAsSuccess(relayExit, relayResult) {
+		logOpenAIWSV2Passthrough(
+			"relay_client_disconnected_after_terminal account_id=%d request_id=%s terminal_event=%s duration_ms=%d turns=%d",
+			account.ID,
+			truncateOpenAIWSLogValue(result.RequestID, openAIWSIDValueMaxLen),
+			truncateOpenAIWSLogValue(relayResult.TerminalEventType, openAIWSLogValueMaxLen),
+			result.Duration.Milliseconds(),
+			turnCount,
+		)
+		return nil
+	}
 
 	relayErr := relayExit.Err
 	if relayExit.Stage == "idle_timeout" {
@@ -374,6 +385,16 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		hooks.AfterTurn(turnCount+1, nil, turnErr)
 	}
 	return turnErr
+}
+
+func shouldTreatPassthroughClientDisconnectAsSuccess(
+	relayExit *openaiwsv2.RelayExit,
+	relayResult openaiwsv2.RelayResult,
+) bool {
+	if relayExit == nil || relayExit.Stage != "client_disconnected" {
+		return false
+	}
+	return strings.TrimSpace(relayResult.TerminalEventType) != ""
 }
 
 func (s *OpenAIGatewayService) mapOpenAIWSPassthroughDialError(
