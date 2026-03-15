@@ -34,14 +34,15 @@ type SoraGatewayHandler struct {
 	gatewayService        *service.GatewayService
 	soraGatewayService    *service.SoraGatewayService
 	billingCacheService   *service.BillingCacheService
+	apiKeyService         *service.APIKeyService
 	usageRecordWorkerPool *service.UsageRecordWorkerPool
 	concurrencyHelper     *ConcurrencyHelper
 	maxAccountSwitches    int
-	usageDetailCapture    service.UsageDetailCaptureConfig
 	streamMode            string
 	soraTLSEnabled        bool
 	soraMediaSigningKey   string
 	soraMediaRoot         string
+	usageDetailCapture    service.UsageDetailCaptureConfig
 }
 
 // NewSoraGatewayHandler creates a new SoraGatewayHandler
@@ -50,6 +51,7 @@ func NewSoraGatewayHandler(
 	soraGatewayService *service.SoraGatewayService,
 	concurrencyService *service.ConcurrencyService,
 	billingCacheService *service.BillingCacheService,
+	apiKeyService *service.APIKeyService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	cfg *config.Config,
 ) *SoraGatewayHandler {
@@ -77,14 +79,15 @@ func NewSoraGatewayHandler(
 		gatewayService:        gatewayService,
 		soraGatewayService:    soraGatewayService,
 		billingCacheService:   billingCacheService,
+		apiKeyService:         apiKeyService,
 		usageRecordWorkerPool: usageRecordWorkerPool,
 		concurrencyHelper:     NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
 		maxAccountSwitches:    maxAccountSwitches,
-		usageDetailCapture:    service.ResolveUsageDetailCaptureConfig(cfg),
 		streamMode:            strings.ToLower(streamMode),
 		soraTLSEnabled:        soraTLSEnabled,
 		soraMediaSigningKey:   signKey,
 		soraMediaRoot:         mediaRoot,
+		usageDetailCapture:    service.ResolveUsageDetailCaptureConfig(cfg),
 	}
 }
 
@@ -117,6 +120,12 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
+	}
+	var payloadCapture *usagePayloadCaptureWriter
+	if h.usageDetailCapture.Enabled {
+		var restorePayloadCapture func()
+		payloadCapture, restorePayloadCapture = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
+		defer restorePayloadCapture()
 	}
 	if len(body) == 0 {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Request body is empty")
@@ -161,12 +170,6 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 	}
 
 	setOpsRequestContext(c, reqModel, clientStream, body)
-	var payloadCapture *usagePayloadCaptureWriter
-	if h.usageDetailCapture.Enabled {
-		var restoreWriter func()
-		payloadCapture, restoreWriter = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
-		defer restoreWriter()
-	}
 
 	platform := ""
 	if forced, ok := middleware2.GetForcePlatformFromContext(c); ok {
@@ -407,7 +410,10 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
-		requestPayload := service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+		var requestPayload service.UsageCapturedPayload
+		if h.usageDetailCapture.Enabled {
+			requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+		}
 		var responseBody []byte
 		var responseContentType string
 		var responseBytes int64
@@ -415,6 +421,7 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 		if payloadCapture != nil {
 			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
 		}
+		requestPayloadHash := service.HashUsageRequestPayload(body)
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(func(ctx context.Context) {
@@ -434,6 +441,8 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 				ResponseBytes:       responseBytes,
 				ResponseContentType: responseContentType,
 				ResponseComplete:    responseComplete,
+				RequestPayloadHash:  requestPayloadHash,
+				APIKeyService:       h.apiKeyService,
 			}); err != nil {
 				logger.L().With(
 					zap.String("component", "handler.sora_gateway.chat_completions"),
