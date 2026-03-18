@@ -422,6 +422,8 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
 		}
 		requestPayloadHash := service.HashUsageRequestPayload(body)
+		inboundEndpoint := GetInboundEndpoint(c)
+		upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
 		// 使用量记录通过有界 worker 池提交，避免请求热路径创建无界 goroutine。
 		h.submitUsageRecordTask(func(ctx context.Context) {
@@ -431,6 +433,8 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 				User:                apiKey.User,
 				Account:             account,
 				Subscription:        subscription,
+				InboundEndpoint:     inboundEndpoint,
+				UpstreamEndpoint:    upstreamEndpoint,
 				UserAgent:           userAgent,
 				IPAddress:           clientIP,
 				RequestBody:         requestPayload.Body,
