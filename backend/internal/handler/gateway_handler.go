@@ -461,6 +461,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
 			}
 			requestPayloadHash := service.HashUsageRequestPayload(body)
+			inboundEndpoint := GetInboundEndpoint(c)
+			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
 			if result.ReasoningEffort == nil {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
@@ -474,6 +476,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					User:                apiKey.User,
 					Account:             account,
 					Subscription:        subscription,
+					InboundEndpoint:     inboundEndpoint,
+					UpstreamEndpoint:    upstreamEndpoint,
 					UserAgent:           userAgent,
 					IPAddress:           clientIP,
 					RequestBody:         requestPayload.Body,
@@ -795,6 +799,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
 			}
 			requestPayloadHash := service.HashUsageRequestPayload(body)
+			inboundEndpoint := GetInboundEndpoint(c)
+			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
 			if result.ReasoningEffort == nil {
 				result.ReasoningEffort = service.NormalizeClaudeOutputEffort(parsedReq.OutputEffort)
@@ -808,6 +814,8 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					User:                currentAPIKey.User,
 					Account:             account,
 					Subscription:        currentSubscription,
+					InboundEndpoint:     inboundEndpoint,
+					UpstreamEndpoint:    upstreamEndpoint,
 					UserAgent:           userAgent,
 					IPAddress:           clientIP,
 					RequestBody:         requestPayload.Body,
@@ -981,7 +989,7 @@ func (h *GatewayHandler) parseUsageDateRange(c *gin.Context) (time.Time, time.Ti
 	}
 	if s := c.Query("end_date"); s != "" {
 		if t, err := timezone.ParseInLocation("2006-01-02", s); err == nil {
-			endTime = t.Add(24*time.Hour - time.Second) // end of day
+			endTime = t.AddDate(0, 0, 1) // half-open range upper bound
 		}
 	}
 	return startTime, endTime

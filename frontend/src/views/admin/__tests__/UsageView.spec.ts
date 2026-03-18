@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getById, route } = vi.hoisted(() => {
+const { list, getStats, getSnapshotV2, getModelStats, getById, route } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -14,6 +14,7 @@ const { list, getStats, getSnapshotV2, getById, route } = vi.hoisted(() => {
     list: vi.fn(),
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
+    getModelStats: vi.fn(),
     getById: vi.fn(),
     route: {
       query: {} as Record<string, unknown>,
@@ -22,6 +23,7 @@ const { list, getStats, getSnapshotV2, getById, route } = vi.hoisted(() => {
 })
 
 const messages: Record<string, string> = {
+  'admin.dashboard.timeRange': 'Time Range',
   'admin.dashboard.day': 'Day',
   'admin.dashboard.hour': 'Hour',
   'admin.usage.failedToLoadUser': 'Failed to load user',
@@ -35,6 +37,7 @@ vi.mock('@/api/admin', () => ({
     },
     dashboard: {
       getSnapshotV2,
+      getModelStats,
     },
     users: {
       getById,
@@ -125,6 +128,7 @@ const mountUsageView = async () => {
         UserBalanceHistoryModal: true,
         Pagination: true,
         Select: true,
+        DateRangePicker: true,
         Icon: true,
         TokenUsageTrend: true,
         EndpointDistributionChart: true,
@@ -155,6 +159,7 @@ describe('admin UsageView distribution metric toggles', () => {
     list.mockReset()
     getStats.mockReset()
     getSnapshotV2.mockReset()
+    getModelStats.mockReset()
     getById.mockReset()
     route.query = {}
 
@@ -177,6 +182,9 @@ describe('admin UsageView distribution metric toggles', () => {
       trend: [],
       models: [],
       groups: [],
+    })
+    getModelStats.mockResolvedValue({
+      models: [],
     })
   })
 
@@ -236,6 +244,10 @@ describe('admin UsageView distribution metric toggles', () => {
     const wrapper = await mountUsageView()
 
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({
+      ...DEFAULT_DATE_RANGE,
+      granularity: 'day'
+    }))
 
     const modelChart = wrapper.find('[data-test="model-chart"]')
     const groupChart = wrapper.find('[data-test="group-chart"]')
