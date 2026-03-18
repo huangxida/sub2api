@@ -7137,10 +7137,12 @@ type RecordUsageInput struct {
 	Subscription        *UserSubscription // 可选：订阅信息
 	UserAgent           string            // 请求的 User-Agent
 	IPAddress           string            // 请求的客户端 IP 地址
+	RequestHeaders      http.Header
 	RequestBody         []byte
 	RequestBytes        int64
 	RequestComplete     bool
 	RequestContentType  string
+	ResponseHeaders     http.Header
 	ResponseBody        []byte
 	ResponseBytes       int64
 	ResponseContentType string
@@ -7618,10 +7620,12 @@ func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInpu
 	detailInput := UsageLogDetailSaveInput{
 		RequestID:           requestID,
 		APIKeyID:            apiKey.ID,
+		RequestHeaders:      input.RequestHeaders,
 		RequestBody:         input.RequestBody,
 		RequestBytes:        input.RequestBytes,
 		RequestContentType:  input.RequestContentType,
 		RequestComplete:     input.RequestComplete,
+		ResponseHeaders:     input.ResponseHeaders,
 		ResponseBody:        input.ResponseBody,
 		ResponseBytes:       input.ResponseBytes,
 		ResponseContentType: input.ResponseContentType,

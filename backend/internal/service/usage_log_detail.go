@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -17,12 +18,14 @@ type UsageLogDetail struct {
 	RequestID  string
 	APIKeyID   int64
 
+	RequestHeaders     *string
 	RequestBody        *string
 	RequestContentType *string
 	RequestBytes       int64
 	RequestIsJSON      bool
 	RequestComplete    bool
 
+	ResponseHeaders     *string
 	ResponseBody        *string
 	ResponseFrames      []string
 	ResponseContentType *string
@@ -38,11 +41,13 @@ type UsageLogDetailSaveInput struct {
 	RequestID  string
 	APIKeyID   int64
 
+	RequestHeaders     http.Header
 	RequestBody        []byte
 	RequestBytes       int64
 	RequestContentType string
 	RequestComplete    bool
 
+	ResponseHeaders     http.Header
 	ResponseBody        []byte
 	ResponseFrames      [][]byte
 	ResponseBytes       int64
@@ -80,10 +85,12 @@ func (s *UsageLogDetailService) Save(ctx context.Context, input UsageLogDetailSa
 		UsageLogID:          input.UsageLogID,
 		RequestID:           requestID,
 		APIKeyID:            input.APIKeyID,
+		RequestHeaders:      httpHeadersToOptionalJSONText(input.RequestHeaders),
 		RequestBody:         rawBytesToOptionalString(input.RequestBody),
 		RequestBytes:        normalizeObservedBytes(input.RequestBytes, input.RequestBody, nil),
 		RequestIsJSON:       input.RequestComplete && len(input.RequestBody) > 0 && json.Valid(input.RequestBody),
 		RequestComplete:     input.RequestComplete,
+		ResponseHeaders:     httpHeadersToOptionalJSONText(input.ResponseHeaders),
 		ResponseBody:        rawBytesToOptionalString(input.ResponseBody),
 		ResponseFrames:      rawFramesToStrings(input.ResponseFrames),
 		ResponseBytes:       normalizeObservedBytes(input.ResponseBytes, input.ResponseBody, input.ResponseFrames),
@@ -228,4 +235,16 @@ func normalizeOptionalString(value string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func httpHeadersToOptionalJSONText(headers http.Header) *string {
+	if len(headers) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(headers)
+	if err != nil || len(payload) == 0 || string(payload) == "null" {
+		return nil
+	}
+	value := string(payload)
+	return &value
 }

@@ -405,14 +405,16 @@ type AdminUsageLog struct {
 }
 
 type AdminUsageDetailResponse struct {
-	UsageLogID  int64               `json:"usage_log_id"`
-	HasDetail   bool                `json:"has_detail"`
-	RequestID   string              `json:"request_id"`
-	Model       string              `json:"model"`
-	RequestType string              `json:"request_type"`
-	CreatedAt   time.Time           `json:"created_at"`
-	Request     *UsageDetailPayload `json:"request,omitempty"`
-	Response    *UsageDetailPayload `json:"response,omitempty"`
+	UsageLogID      int64               `json:"usage_log_id"`
+	HasDetail       bool                `json:"has_detail"`
+	RequestID       string              `json:"request_id"`
+	Model           string              `json:"model"`
+	RequestType     string              `json:"request_type"`
+	CreatedAt       time.Time           `json:"created_at"`
+	RequestHeaders  *UsageDetailPayload `json:"request_headers,omitempty"`
+	Request         *UsageDetailPayload `json:"request,omitempty"`
+	ResponseHeaders *UsageDetailPayload `json:"response_headers,omitempty"`
+	Response        *UsageDetailPayload `json:"response,omitempty"`
 }
 
 type UsageDetailPayload struct {

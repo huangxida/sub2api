@@ -449,6 +449,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
+			var requestHeaders http.Header
+			if h.usageDetailCapture.Enabled && c.Request != nil {
+				requestHeaders = c.Request.Header.Clone()
+			}
 			var requestPayload service.UsageCapturedPayload
 			if h.usageDetailCapture.Enabled {
 				requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
@@ -457,8 +461,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			var responseContentType string
 			var responseBytes int64
 			responseComplete := true
+			var responseHeaders http.Header
 			if payloadCapture != nil {
 				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+			}
+			if h.usageDetailCapture.Enabled {
+				responseHeaders = c.Writer.Header().Clone()
 			}
 			requestPayloadHash := service.HashUsageRequestPayload(body)
 
@@ -476,10 +484,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					Subscription:        subscription,
 					UserAgent:           userAgent,
 					IPAddress:           clientIP,
+					RequestHeaders:      requestHeaders,
 					RequestBody:         requestPayload.Body,
 					RequestBytes:        requestPayload.Bytes,
 					RequestComplete:     requestPayload.Complete,
 					RequestContentType:  c.ContentType(),
+					ResponseHeaders:     responseHeaders,
 					ResponseBody:        responseBody,
 					ResponseBytes:       responseBytes,
 					ResponseContentType: responseContentType,
@@ -783,6 +793,10 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
+			var requestHeaders http.Header
+			if h.usageDetailCapture.Enabled && c.Request != nil {
+				requestHeaders = c.Request.Header.Clone()
+			}
 			var requestPayload service.UsageCapturedPayload
 			if h.usageDetailCapture.Enabled {
 				requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
@@ -791,8 +805,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			var responseContentType string
 			var responseBytes int64
 			responseComplete := true
+			var responseHeaders http.Header
 			if payloadCapture != nil {
 				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+			}
+			if h.usageDetailCapture.Enabled {
+				responseHeaders = c.Writer.Header().Clone()
 			}
 			requestPayloadHash := service.HashUsageRequestPayload(body)
 
@@ -810,10 +828,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					Subscription:        currentSubscription,
 					UserAgent:           userAgent,
 					IPAddress:           clientIP,
+					RequestHeaders:      requestHeaders,
 					RequestBody:         requestPayload.Body,
 					RequestBytes:        requestPayload.Bytes,
 					RequestComplete:     requestPayload.Complete,
 					RequestContentType:  c.ContentType(),
+					ResponseHeaders:     responseHeaders,
 					ResponseBody:        responseBody,
 					ResponseBytes:       responseBytes,
 					ResponseContentType: responseContentType,

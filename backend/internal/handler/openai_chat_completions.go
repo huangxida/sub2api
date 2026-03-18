@@ -253,6 +253,14 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		var requestHeaders http.Header
+		if h.usageDetailCapture.Enabled && c.Request != nil {
+			requestHeaders = c.Request.Header.Clone()
+		}
+		var responseHeaders http.Header
+		if h.usageDetailCapture.Enabled {
+			responseHeaders = c.Writer.Header().Clone()
+		}
 
 		h.submitUsageRecordTask(func(ctx context.Context) {
 			if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
@@ -265,6 +273,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				UpstreamEndpoint: normalizedOpenAIUpstreamEndpoint(c, openAIUpstreamEndpointResponses),
 				UserAgent:        userAgent,
 				IPAddress:        clientIP,
+				RequestHeaders:   requestHeaders,
+				ResponseHeaders:  responseHeaders,
 				APIKeyService:    h.apiKeyService,
 			}); err != nil {
 				logger.L().With(
