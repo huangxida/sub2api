@@ -49,7 +49,6 @@ dockers_v2:
       - latest
     platforms:
       - linux/amd64
-    use: buildx
     extra_files:
       - deploy/docker-entrypoint.sh
     labels:
