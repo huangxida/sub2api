@@ -51,6 +51,8 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	require.True(t, usageLogDetailsRegclass.Valid, "expected usage_log_details table to exist")
 	requireColumn(t, tx, "usage_log_details", "request_id", "character varying", 64, true)
 	requireColumn(t, tx, "usage_log_details", "api_key_id", "bigint", 0, true)
+	requireColumn(t, tx, "usage_log_details", "request_headers", "jsonb", 0, true)
+	requireColumn(t, tx, "usage_log_details", "response_headers", "jsonb", 0, true)
 	requireIndex(t, tx, "usage_log_details", "idx_usage_log_details_request_id_api_key_unique")
 
 	// usage_billing_dedup: billing idempotency narrow table

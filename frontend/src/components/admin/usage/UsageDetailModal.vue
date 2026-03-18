@@ -1,7 +1,10 @@
 <template>
   <BaseDialog :show="show" :title="t('admin.usage.detail.title')" width="full" @close="handleClose">
     <div class="space-y-4">
-      <div v-if="usage" class="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm dark:border-dark-600 dark:bg-dark-900 md:grid-cols-4">
+      <div
+        v-if="usage"
+        class="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm dark:border-dark-600 dark:bg-dark-900 md:grid-cols-4"
+      >
         <div>
           <div class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.usage.requestId') }}</div>
           <div class="mt-1 break-all font-mono text-xs text-gray-900 dark:text-gray-100">{{ detail?.request_id || usage.request_id || '-' }}</div>
@@ -55,61 +58,246 @@
         {{ t('admin.usage.detail.noDetail') }}
       </div>
 
-      <div v-else-if="activePayload" class="space-y-4">
-        <div class="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900 lg:flex-row lg:items-center lg:justify-between">
-          <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
-            <span>{{ t('admin.usage.detail.contentType') }}: {{ activePayload.content_type || '-' }}</span>
-            <span>{{ t('admin.usage.detail.sizeBytes') }}: {{ activePayload.size_bytes }}</span>
-            <span v-if="activePayload.complete != null">
-              {{ t('admin.usage.detail.complete') }}:
-              {{ activePayload.complete ? t('common.yes') : t('common.no') }}
-            </span>
+      <div v-else-if="activeSection === 'request'" class="space-y-4">
+        <div v-if="requestHeadersPayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div class="space-y-2">
+              <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.requestHeaders') }}</div>
+              <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
+                <span>{{ t('admin.usage.detail.contentType') }}: {{ requestHeadersPayload.content_type || '-' }}</span>
+                <span>{{ t('admin.usage.detail.sizeBytes') }}: {{ requestHeadersPayload.size_bytes }}</span>
+                <span v-if="requestHeadersPayload.complete != null">
+                  {{ t('admin.usage.detail.complete') }}:
+                  {{ requestHeadersPayload.complete ? t('common.yes') : t('common.no') }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="requestHeadersCanShowJSON" class="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                :class="requestHeadersViewMode === 'json'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                @click="requestHeadersViewMode = 'json'"
+              >
+                {{ t('admin.usage.detail.jsonView') }}
+              </button>
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                :class="requestHeadersViewMode === 'raw'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                @click="requestHeadersViewMode = 'raw'"
+              >
+                {{ t('admin.usage.detail.rawView') }}
+              </button>
+            </div>
           </div>
 
-          <div v-if="activePayload.kind === 'frames'" class="flex items-center gap-2">
-            <label class="text-sm text-gray-600 dark:text-gray-300" for="frame-select">
-              {{ t('admin.usage.detail.frameSelect') }}
-            </label>
-            <select id="frame-select" v-model.number="selectedFrameIndex" class="input-field w-40">
-              <option v-for="(_, index) in activePayload.frames || []" :key="index" :value="index">
-                {{ t('admin.usage.detail.frameLabel', { index: index + 1 }) }}
-              </option>
-            </select>
+          <div class="mt-4">
+            <JsonTreeViewer
+              v-if="requestHeadersViewMode === 'json' && requestHeadersCanShowJSON && requestHeadersJSON != null"
+              :value="requestHeadersJSON"
+              :raw="requestHeadersRaw"
+            />
+            <TextSearchViewer
+              v-else
+              :content="requestHeadersRaw"
+            />
           </div>
         </div>
 
-        <div v-if="showJsonToggle" class="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
-            :class="activeViewMode === 'json'
-              ? 'bg-primary-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
-            @click="activeViewMode = 'json'"
-          >
-            {{ t('admin.usage.detail.jsonView') }}
-          </button>
-          <button
-            type="button"
-            class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
-            :class="activeViewMode === 'raw'
-              ? 'bg-primary-600 text-white'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
-            @click="activeViewMode = 'raw'"
-          >
-            {{ t('admin.usage.detail.rawView') }}
-          </button>
+        <div v-else class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+          {{ t('admin.usage.detail.noRequestHeaders') }}
         </div>
 
-        <JsonTreeViewer
-          v-if="activeViewMode === 'json' && activeJSON != null"
-          :value="activeJSON"
-          :raw="activeRaw"
-        />
-        <TextSearchViewer
-          v-else
-          :content="activeRaw"
-        />
+        <div v-if="requestPayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div class="space-y-2">
+              <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.requestBody') }}</div>
+              <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
+                <span>{{ t('admin.usage.detail.contentType') }}: {{ requestPayload.content_type || '-' }}</span>
+                <span>{{ t('admin.usage.detail.sizeBytes') }}: {{ requestPayload.size_bytes }}</span>
+                <span v-if="requestPayload.complete != null">
+                  {{ t('admin.usage.detail.complete') }}:
+                  {{ requestPayload.complete ? t('common.yes') : t('common.no') }}
+                </span>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <div v-if="requestPayload.kind === 'frames'" class="flex items-center gap-2">
+                <label class="text-sm text-gray-600 dark:text-gray-300" for="request-frame-select">
+                  {{ t('admin.usage.detail.frameSelect') }}
+                </label>
+                <select id="request-frame-select" v-model.number="selectedRequestFrameIndex" class="input-field w-40">
+                  <option v-for="(_, index) in requestPayload.frames || []" :key="index" :value="index">
+                    {{ t('admin.usage.detail.frameLabel', { index: index + 1 }) }}
+                  </option>
+                </select>
+              </div>
+
+              <template v-if="requestPayloadCanShowJSON">
+                <button
+                  type="button"
+                  class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                  :class="requestViewMode === 'json'
+                    ? 'bg-primary-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                  @click="requestViewMode = 'json'"
+                >
+                  {{ t('admin.usage.detail.jsonView') }}
+                </button>
+                <button
+                  type="button"
+                  class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                  :class="requestViewMode === 'raw'
+                    ? 'bg-primary-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                  @click="requestViewMode = 'raw'"
+                >
+                  {{ t('admin.usage.detail.rawView') }}
+                </button>
+              </template>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <JsonTreeViewer
+              v-if="requestViewMode === 'json' && requestPayloadCanShowJSON && requestPayloadJSON != null"
+              :value="requestPayloadJSON"
+              :raw="requestPayloadRaw"
+            />
+            <TextSearchViewer
+              v-else
+              :content="requestPayloadRaw"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="space-y-4">
+        <div v-if="responseHeadersPayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div class="space-y-2">
+              <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.responseHeaders') }}</div>
+              <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
+                <span>{{ t('admin.usage.detail.contentType') }}: {{ responseHeadersPayload.content_type || '-' }}</span>
+                <span>{{ t('admin.usage.detail.sizeBytes') }}: {{ responseHeadersPayload.size_bytes }}</span>
+                <span v-if="responseHeadersPayload.complete != null">
+                  {{ t('admin.usage.detail.complete') }}:
+                  {{ responseHeadersPayload.complete ? t('common.yes') : t('common.no') }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="responseHeadersCanShowJSON" class="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                :class="responseHeadersViewMode === 'json'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                @click="responseHeadersViewMode = 'json'"
+              >
+                {{ t('admin.usage.detail.jsonView') }}
+              </button>
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                :class="responseHeadersViewMode === 'raw'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                @click="responseHeadersViewMode = 'raw'"
+              >
+                {{ t('admin.usage.detail.rawView') }}
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <JsonTreeViewer
+              v-if="responseHeadersViewMode === 'json' && responseHeadersCanShowJSON && responseHeadersJSON != null"
+              :value="responseHeadersJSON"
+              :raw="responseHeadersRaw"
+            />
+            <TextSearchViewer
+              v-else
+              :content="responseHeadersRaw"
+            />
+          </div>
+        </div>
+
+        <div v-else class="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
+          {{ t('admin.usage.detail.noResponseHeaders') }}
+        </div>
+
+        <div v-if="responsePayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div class="space-y-2">
+              <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.responseBody') }}</div>
+              <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
+                <span>{{ t('admin.usage.detail.contentType') }}: {{ responsePayload.content_type || '-' }}</span>
+                <span>{{ t('admin.usage.detail.sizeBytes') }}: {{ responsePayload.size_bytes }}</span>
+                <span v-if="responsePayload.complete != null">
+                  {{ t('admin.usage.detail.complete') }}:
+                  {{ responsePayload.complete ? t('common.yes') : t('common.no') }}
+                </span>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <div v-if="responsePayload.kind === 'frames'" class="flex items-center gap-2">
+                <label class="text-sm text-gray-600 dark:text-gray-300" for="response-frame-select">
+                  {{ t('admin.usage.detail.frameSelect') }}
+                </label>
+                <select id="response-frame-select" v-model.number="selectedResponseFrameIndex" class="input-field w-40">
+                  <option v-for="(_, index) in responsePayload.frames || []" :key="index" :value="index">
+                    {{ t('admin.usage.detail.frameLabel', { index: index + 1 }) }}
+                  </option>
+                </select>
+              </div>
+
+              <template v-if="responsePayloadCanShowJSON">
+                <button
+                  type="button"
+                  class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                  :class="responseViewMode === 'json'
+                    ? 'bg-primary-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                  @click="responseViewMode = 'json'"
+                >
+                  {{ t('admin.usage.detail.jsonView') }}
+                </button>
+                <button
+                  type="button"
+                  class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                  :class="responseViewMode === 'raw'
+                    ? 'bg-primary-600 text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                  @click="responseViewMode = 'raw'"
+                >
+                  {{ t('admin.usage.detail.rawView') }}
+                </button>
+              </template>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <JsonTreeViewer
+              v-if="responseViewMode === 'json' && responsePayloadCanShowJSON && responsePayloadJSON != null"
+              :value="responsePayloadJSON"
+              :raw="responsePayloadRaw"
+            />
+            <TextSearchViewer
+              v-else
+              :content="responsePayloadRaw"
+            />
+          </div>
+        </div>
       </div>
     </div>
   </BaseDialog>
@@ -123,6 +311,8 @@ import { formatDateTime } from '@/utils/format'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import JsonTreeViewer from './JsonTreeViewer.vue'
 import TextSearchViewer from './TextSearchViewer.vue'
+
+type ViewMode = 'json' | 'raw'
 
 const props = defineProps<{
   show: boolean
@@ -138,8 +328,12 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const activeSection = ref<'request' | 'response'>('request')
-const activeViewMode = ref<'json' | 'raw'>('json')
-const selectedFrameIndex = ref(0)
+const requestHeadersViewMode = ref<ViewMode>('json')
+const requestViewMode = ref<ViewMode>('json')
+const responseHeadersViewMode = ref<ViewMode>('json')
+const responseViewMode = ref<ViewMode>('json')
+const selectedRequestFrameIndex = ref(0)
+const selectedResponseFrameIndex = ref(0)
 
 const requestTypeLabel = computed(() => {
   const requestType = props.detail?.request_type || props.usage?.request_type
@@ -149,55 +343,69 @@ const requestTypeLabel = computed(() => {
   return t('usage.unknown')
 })
 
-const activePayload = computed<UsageDetailPayload | null>(() => {
-  if (!props.detail) {
-    return null
-  }
-  return activeSection.value === 'request'
-    ? (props.detail.request || null)
-    : (props.detail.response || null)
-})
+const requestHeadersPayload = computed<UsageDetailPayload | null>(() => props.detail?.request_headers || null)
+const requestPayload = computed<UsageDetailPayload | null>(() => props.detail?.request || null)
+const responseHeadersPayload = computed<UsageDetailPayload | null>(() => props.detail?.response_headers || null)
+const responsePayload = computed<UsageDetailPayload | null>(() => props.detail?.response || null)
 
-const activeRaw = computed(() => {
-  const payload = activePayload.value
+const getPayloadRaw = (payload: UsageDetailPayload | null, frameIndex = 0) => {
   if (!payload) {
     return ''
   }
   if (payload.kind === 'frames') {
-    return payload.frames?.[selectedFrameIndex.value] || ''
+    return payload.frames?.[frameIndex] || ''
   }
   return payload.body || ''
-})
+}
 
-const activeJSON = computed(() => {
-  const payload = activePayload.value
+const getPayloadJSON = (payload: UsageDetailPayload | null, frameIndex = 0) => {
   if (!payload) {
     return null
   }
   if (payload.kind === 'body' && !payload.is_json) {
     return null
   }
-  if (payload.kind === 'frames') {
-    const frame = payload.frames?.[selectedFrameIndex.value] || ''
-    if (!frame) {
-      return null
-    }
-  }
-  if (!activeRaw.value) {
+  const raw = getPayloadRaw(payload, frameIndex)
+  if (!raw) {
     return null
   }
   try {
-    return JSON.parse(activeRaw.value)
+    return JSON.parse(raw)
   } catch {
     return null
   }
-})
+}
 
-const showJsonToggle = computed(() => activeJSON.value !== null)
+const canShowJSONView = (payload: UsageDetailPayload | null, frameIndex = 0) => {
+  if (!payload || !payload.is_json) {
+    return false
+  }
+  return getPayloadRaw(payload, frameIndex).trim().length > 0
+}
+
+const requestHeadersRaw = computed(() => getPayloadRaw(requestHeadersPayload.value))
+const requestHeadersCanShowJSON = computed(() => canShowJSONView(requestHeadersPayload.value))
+const requestHeadersJSON = computed(() => getPayloadJSON(requestHeadersPayload.value))
+
+const requestPayloadRaw = computed(() => getPayloadRaw(requestPayload.value, selectedRequestFrameIndex.value))
+const requestPayloadCanShowJSON = computed(() => canShowJSONView(requestPayload.value, selectedRequestFrameIndex.value))
+const requestPayloadJSON = computed(() => getPayloadJSON(requestPayload.value, selectedRequestFrameIndex.value))
+
+const responseHeadersRaw = computed(() => getPayloadRaw(responseHeadersPayload.value))
+const responseHeadersCanShowJSON = computed(() => canShowJSONView(responseHeadersPayload.value))
+const responseHeadersJSON = computed(() => getPayloadJSON(responseHeadersPayload.value))
+
+const responsePayloadRaw = computed(() => getPayloadRaw(responsePayload.value, selectedResponseFrameIndex.value))
+const responsePayloadCanShowJSON = computed(() => canShowJSONView(responsePayload.value, selectedResponseFrameIndex.value))
+const responsePayloadJSON = computed(() => getPayloadJSON(responsePayload.value, selectedResponseFrameIndex.value))
 
 watch([() => props.show, () => props.detail, activeSection], () => {
-  selectedFrameIndex.value = 0
-  activeViewMode.value = activeJSON.value !== null ? 'json' : 'raw'
+  selectedRequestFrameIndex.value = 0
+  selectedResponseFrameIndex.value = 0
+  requestHeadersViewMode.value = requestHeadersCanShowJSON.value ? 'json' : 'raw'
+  requestViewMode.value = requestPayloadCanShowJSON.value ? 'json' : 'raw'
+  responseHeadersViewMode.value = responseHeadersCanShowJSON.value ? 'json' : 'raw'
+  responseViewMode.value = responsePayloadCanShowJSON.value ? 'json' : 'raw'
 }, { immediate: true })
 
 const handleClose = () => {

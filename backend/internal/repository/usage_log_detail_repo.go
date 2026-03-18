@@ -50,11 +50,13 @@ func (r *usageLogDetailRepository) Upsert(ctx context.Context, detail *service.U
 			usage_log_id,
 			request_id,
 			api_key_id,
+			request_headers,
 			request_body,
 			request_content_type,
 			request_bytes,
 			request_is_json,
 			request_complete,
+			response_headers,
 			response_body,
 			response_frames,
 			response_content_type,
@@ -63,15 +65,17 @@ func (r *usageLogDetailRepository) Upsert(ctx context.Context, detail *service.U
 			response_complete
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
-			$9, $10, $11, $12, $13, $14
+			$9, $10, $11, $12, $13, $14, $15, $16
 		)
 		ON CONFLICT (request_id, api_key_id) DO UPDATE SET
 			usage_log_id = COALESCE(EXCLUDED.usage_log_id, usage_log_details.usage_log_id),
+			request_headers = EXCLUDED.request_headers,
 			request_body = EXCLUDED.request_body,
 			request_content_type = EXCLUDED.request_content_type,
 			request_bytes = EXCLUDED.request_bytes,
 			request_is_json = EXCLUDED.request_is_json,
 			request_complete = EXCLUDED.request_complete,
+			response_headers = EXCLUDED.response_headers,
 			response_body = EXCLUDED.response_body,
 			response_frames = EXCLUDED.response_frames,
 			response_content_type = EXCLUDED.response_content_type,
@@ -82,11 +86,13 @@ func (r *usageLogDetailRepository) Upsert(ctx context.Context, detail *service.U
 		nullOptionalInt64(detail.UsageLogID),
 		requestID,
 		detail.APIKeyID,
+		nullOptionalText(detail.RequestHeaders),
 		nullOptionalText(detail.RequestBody),
 		nullOptionalText(detail.RequestContentType),
 		detail.RequestBytes,
 		detail.RequestIsJSON,
 		detail.RequestComplete,
+		nullOptionalText(detail.ResponseHeaders),
 		nullOptionalText(detail.ResponseBody),
 		responseFrames,
 		nullOptionalText(detail.ResponseContentType),
@@ -112,11 +118,13 @@ func (r *usageLogDetailRepository) GetByRequestKey(ctx context.Context, key serv
 			COALESCE(usage_log_id, 0),
 			COALESCE(request_id, ''),
 			COALESCE(api_key_id, 0),
+			request_headers,
 			request_body,
 			request_content_type,
 			request_bytes,
 			request_is_json,
 			request_complete,
+			response_headers,
 			response_body,
 			response_frames,
 			response_content_type,
@@ -138,11 +146,13 @@ func (r *usageLogDetailRepository) GetByUsageLogID(ctx context.Context, usageLog
 			COALESCE(usage_log_id, 0),
 			COALESCE(request_id, ''),
 			COALESCE(api_key_id, 0),
+			request_headers,
 			request_body,
 			request_content_type,
 			request_bytes,
 			request_is_json,
 			request_complete,
+			response_headers,
 			response_body,
 			response_frames,
 			response_content_type,
@@ -273,22 +283,26 @@ func (r *usageLogDetailRepository) getDetail(ctx context.Context, query string, 
 	}
 
 	var (
-		detail              service.UsageLogDetail
-		requestBody         sql.NullString
-		requestContentType  sql.NullString
-		responseBody        sql.NullString
-		responseFramesBytes []byte
-		responseContentType sql.NullString
+		detail               service.UsageLogDetail
+		requestHeadersBytes  []byte
+		requestBody          sql.NullString
+		requestContentType   sql.NullString
+		responseHeadersBytes []byte
+		responseBody         sql.NullString
+		responseFramesBytes  []byte
+		responseContentType  sql.NullString
 	)
 	if err := rows.Scan(
 		&detail.UsageLogID,
 		&detail.RequestID,
 		&detail.APIKeyID,
+		&requestHeadersBytes,
 		&requestBody,
 		&requestContentType,
 		&detail.RequestBytes,
 		&detail.RequestIsJSON,
 		&detail.RequestComplete,
+		&responseHeadersBytes,
 		&responseBody,
 		&responseFramesBytes,
 		&responseContentType,
@@ -303,8 +317,10 @@ func (r *usageLogDetailRepository) getDetail(ctx context.Context, query string, 
 		return nil, rows.Err()
 	}
 
+	detail.RequestHeaders = jsonTextPtrFromBytes(requestHeadersBytes)
 	detail.RequestBody = stringPtrFromNullString(requestBody)
 	detail.RequestContentType = stringPtrFromNullString(requestContentType)
+	detail.ResponseHeaders = jsonTextPtrFromBytes(responseHeadersBytes)
 	detail.ResponseBody = stringPtrFromNullString(responseBody)
 	detail.ResponseContentType = stringPtrFromNullString(responseContentType)
 	if len(responseFramesBytes) > 0 {
@@ -328,6 +344,14 @@ func stringPtrFromNullString(value sql.NullString) *string {
 	}
 	out := value.String
 	return &out
+}
+
+func jsonTextPtrFromBytes(value []byte) *string {
+	trimmed := strings.TrimSpace(string(value))
+	if trimmed == "" || trimmed == "null" {
+		return nil
+	}
+	return &trimmed
 }
 
 func nullOptionalInt64(value int64) sql.NullInt64 {

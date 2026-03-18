@@ -410,6 +410,10 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		var requestHeaders http.Header
+		if h.usageDetailCapture.Enabled && c.Request != nil {
+			requestHeaders = c.Request.Header.Clone()
+		}
 		var requestPayload service.UsageCapturedPayload
 		if h.usageDetailCapture.Enabled {
 			requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
@@ -418,8 +422,12 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 		var responseContentType string
 		var responseBytes int64
 		responseComplete := true
+		var responseHeaders http.Header
 		if payloadCapture != nil {
 			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+		}
+		if h.usageDetailCapture.Enabled {
+			responseHeaders = c.Writer.Header().Clone()
 		}
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 		inboundEndpoint := GetInboundEndpoint(c)
@@ -437,10 +445,12 @@ func (h *SoraGatewayHandler) ChatCompletions(c *gin.Context) {
 				UpstreamEndpoint:    upstreamEndpoint,
 				UserAgent:           userAgent,
 				IPAddress:           clientIP,
+				RequestHeaders:      requestHeaders,
 				RequestBody:         requestPayload.Body,
 				RequestBytes:        requestPayload.Bytes,
 				RequestComplete:     requestPayload.Complete,
 				RequestContentType:  c.ContentType(),
+				ResponseHeaders:     responseHeaders,
 				ResponseBody:        responseBody,
 				ResponseBytes:       responseBytes,
 				ResponseContentType: responseContentType,

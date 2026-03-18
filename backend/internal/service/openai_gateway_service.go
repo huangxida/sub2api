@@ -4080,10 +4080,12 @@ type OpenAIRecordUsageInput struct {
 	UpstreamEndpoint    string
 	UserAgent           string // 请求的 User-Agent
 	IPAddress           string // 请求的客户端 IP 地址
+	RequestHeaders      http.Header
 	RequestBody         []byte
 	RequestBytes        int64
 	RequestComplete     bool
 	RequestContentType  string
+	ResponseHeaders     http.Header
 	ResponseBody        []byte
 	ResponseFrames      [][]byte
 	ResponseBytes       int64
@@ -4246,13 +4248,19 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if !responseComplete && result.ResponseComplete {
 		responseComplete = true
 	}
+	responseHeaders := input.ResponseHeaders
+	if len(responseHeaders) == 0 && len(result.ResponseHeaders) > 0 {
+		responseHeaders = result.ResponseHeaders
+	}
 	detailInput := UsageLogDetailSaveInput{
 		RequestID:           requestID,
 		APIKeyID:            apiKey.ID,
+		RequestHeaders:      input.RequestHeaders,
 		RequestBody:         requestBody,
 		RequestBytes:        requestBytes,
 		RequestContentType:  requestContentType,
 		RequestComplete:     requestComplete,
+		ResponseHeaders:     responseHeaders,
 		ResponseBody:        responseBody,
 		ResponseFrames:      responseFrames,
 		ResponseBytes:       responseBytes,

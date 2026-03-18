@@ -603,6 +603,19 @@ func AdminUsageDetailFromService(log *service.UsageLog, detail *service.UsageLog
 		return resp
 	}
 
+	if detail.RequestHeaders != nil {
+		contentType := "application/json"
+		complete := true
+		resp.RequestHeaders = &UsageDetailPayload{
+			Kind:        "body",
+			ContentType: &contentType,
+			SizeBytes:   int64(len([]byte(*detail.RequestHeaders))),
+			IsJSON:      true,
+			Complete:    &complete,
+			Body:        detail.RequestHeaders,
+		}
+	}
+
 	if detail.RequestBody != nil || detail.RequestContentType != nil || detail.RequestBytes > 0 {
 		complete := detail.RequestComplete
 		resp.Request = &UsageDetailPayload{
@@ -612,6 +625,19 @@ func AdminUsageDetailFromService(log *service.UsageLog, detail *service.UsageLog
 			IsJSON:      detail.RequestIsJSON,
 			Complete:    &complete,
 			Body:        detail.RequestBody,
+		}
+	}
+
+	if detail.ResponseHeaders != nil {
+		contentType := "application/json"
+		complete := true
+		resp.ResponseHeaders = &UsageDetailPayload{
+			Kind:        "body",
+			ContentType: &contentType,
+			SizeBytes:   int64(len([]byte(*detail.ResponseHeaders))),
+			IsJSON:      true,
+			Complete:    &complete,
+			Body:        detail.ResponseHeaders,
 		}
 	}
 

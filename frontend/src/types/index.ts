@@ -1062,7 +1062,9 @@ export interface AdminUsageDetailResponse {
   model: string
   request_type: UsageRequestType
   created_at: string
+  request_headers?: UsageDetailPayload | null
   request?: UsageDetailPayload | null
+  response_headers?: UsageDetailPayload | null
   response?: UsageDetailPayload | null
 }
 

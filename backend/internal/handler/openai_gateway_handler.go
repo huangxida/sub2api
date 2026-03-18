@@ -360,6 +360,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		var requestHeaders http.Header
+		if h.usageDetailCapture.Enabled && c.Request != nil {
+			requestHeaders = c.Request.Header.Clone()
+		}
 		var requestPayload service.UsageCapturedPayload
 		if h.usageDetailCapture.Enabled {
 			requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
@@ -368,8 +372,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		var responseContentType string
 		var responseBytes int64
 		responseComplete := true
+		var responseHeaders http.Header
 		if payloadCapture != nil {
 			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+		}
+		if h.usageDetailCapture.Enabled {
+			responseHeaders = c.Writer.Header().Clone()
 		}
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 
@@ -385,10 +393,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				UpstreamEndpoint:    GetUpstreamEndpoint(c, account.Platform),
 				UserAgent:           userAgent,
 				IPAddress:           clientIP,
+				RequestHeaders:      requestHeaders,
 				RequestBody:         requestPayload.Body,
 				RequestBytes:        requestPayload.Bytes,
 				RequestComplete:     requestPayload.Complete,
 				RequestContentType:  c.ContentType(),
+				ResponseHeaders:     responseHeaders,
 				ResponseBody:        responseBody,
 				ResponseBytes:       responseBytes,
 				ResponseContentType: responseContentType,
@@ -765,6 +775,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		var requestHeaders http.Header
+		if h.usageDetailCapture.Enabled && c.Request != nil {
+			requestHeaders = c.Request.Header.Clone()
+		}
 		var requestPayload service.UsageCapturedPayload
 		if h.usageDetailCapture.Enabled {
 			requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
@@ -773,8 +787,12 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		var responseContentType string
 		var responseBytes int64
 		responseComplete := true
+		var responseHeaders http.Header
 		if payloadCapture != nil {
 			responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+		}
+		if h.usageDetailCapture.Enabled {
+			responseHeaders = c.Writer.Header().Clone()
 		}
 		requestPayloadHash := service.HashUsageRequestPayload(body)
 
@@ -789,10 +807,12 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				UpstreamEndpoint:    GetUpstreamEndpoint(c, account.Platform),
 				UserAgent:           userAgent,
 				IPAddress:           clientIP,
+				RequestHeaders:      requestHeaders,
 				RequestBody:         requestPayload.Body,
 				RequestBytes:        requestPayload.Bytes,
 				RequestComplete:     requestPayload.Complete,
 				RequestContentType:  c.ContentType(),
+				ResponseHeaders:     responseHeaders,
 				ResponseBody:        responseBody,
 				ResponseBytes:       responseBytes,
 				ResponseContentType: responseContentType,
@@ -1075,6 +1095,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	reqLog.Info("openai.websocket_ingress_started")
 	clientIP := ip.GetClientIP(c)
 	userAgent := strings.TrimSpace(c.GetHeader("User-Agent"))
+	var requestHeaders http.Header
+	if h.usageDetailCapture.Enabled && c.Request != nil {
+		requestHeaders = c.Request.Header.Clone()
+	}
 
 	wsConn, err := coderws.Accept(c.Writer, c.Request, &coderws.AcceptOptions{
 		CompressionMode: coderws.CompressionContextTakeover,
@@ -1296,10 +1320,12 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					UpstreamEndpoint:    GetUpstreamEndpoint(c, account.Platform),
 					UserAgent:           userAgent,
 					IPAddress:           clientIP,
+					RequestHeaders:      requestHeaders,
 					RequestBody:         result.RequestBody,
 					RequestBytes:        result.RequestBytes,
 					RequestComplete:     result.RequestComplete,
 					RequestContentType:  result.RequestContentType,
+					ResponseHeaders:     result.ResponseHeaders,
 					ResponseBody:        result.ResponseBody,
 					ResponseFrames:      result.ResponseFrames,
 					ResponseBytes:       result.ResponseBytes,
