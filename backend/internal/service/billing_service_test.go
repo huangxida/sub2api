@@ -174,6 +174,71 @@ func TestGetModelPricing_OpenAIGPT54Fallback(t *testing.T) {
 	require.InDelta(t, 1.5, pricing.LongContextOutputMultiplier, 1e-12)
 }
 
+func TestGetModelPricing_MiniMaxFallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	tests := []struct {
+		name                string
+		model               string
+		inputPricePerToken  float64
+		outputPricePerToken float64
+		cacheReadPrice      float64
+		cacheCreationPrice  float64
+	}{
+		{
+			name:                "m2.7 highspeed",
+			model:               "MiniMax-M2.7-highspeed",
+			inputPricePerToken:  0.6e-6,
+			outputPricePerToken: 2.4e-6,
+			cacheReadPrice:      0.06e-6,
+			cacheCreationPrice:  0.375e-6,
+		},
+		{
+			name:                "m2.7 standard",
+			model:               "MiniMax-M2.7",
+			inputPricePerToken:  0.3e-6,
+			outputPricePerToken: 1.2e-6,
+			cacheReadPrice:      0.06e-6,
+			cacheCreationPrice:  0.375e-6,
+		},
+		{
+			name:                "m2.5 highspeed",
+			model:               "MiniMax-M2.5-highspeed",
+			inputPricePerToken:  0.6e-6,
+			outputPricePerToken: 2.4e-6,
+			cacheReadPrice:      0.03e-6,
+			cacheCreationPrice:  0.375e-6,
+		},
+		{
+			name:                "m2.5 standard",
+			model:               "MiniMax-M2.5",
+			inputPricePerToken:  0.3e-6,
+			outputPricePerToken: 1.2e-6,
+			cacheReadPrice:      0.03e-6,
+			cacheCreationPrice:  0.375e-6,
+		},
+		{
+			name:                "m2-her",
+			model:               "M2-her",
+			inputPricePerToken:  0.3e-6,
+			outputPricePerToken: 1.2e-6,
+			cacheReadPrice:      0,
+			cacheCreationPrice:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(tt.model)
+			require.NoError(t, err)
+			require.InDelta(t, tt.inputPricePerToken, pricing.InputPricePerToken, 1e-12)
+			require.InDelta(t, tt.outputPricePerToken, pricing.OutputPricePerToken, 1e-12)
+			require.InDelta(t, tt.cacheReadPrice, pricing.CacheReadPricePerToken, 1e-12)
+			require.InDelta(t, tt.cacheCreationPrice, pricing.CacheCreationPricePerToken, 1e-12)
+		})
+	}
+}
+
 func TestCalculateCost_OpenAIGPT54LongContextAppliesWholeSessionMultipliers(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -193,6 +258,70 @@ func TestCalculateCost_OpenAIGPT54LongContextAppliesWholeSessionMultipliers(t *t
 	require.InDelta(t, expectedInput+expectedOutput, cost.ActualCost, 1e-10)
 }
 
+func TestCalculateCost_MiniMaxOfficialPricing(t *testing.T) {
+	svc := newTestBillingService()
+
+	tests := []struct {
+		name                  string
+		model                 string
+		expectedInputPrice    float64
+		expectedOutputPrice   float64
+		expectedCacheRead     float64
+		expectedCacheCreation float64
+	}{
+		{
+			name:                  "m2.7 highspeed",
+			model:                 "MiniMax-M2.7-highspeed",
+			expectedInputPrice:    0.6e-6,
+			expectedOutputPrice:   2.4e-6,
+			expectedCacheRead:     0.06e-6,
+			expectedCacheCreation: 0.375e-6,
+		},
+		{
+			name:                  "m2.5 standard",
+			model:                 "MiniMax-M2.5",
+			expectedInputPrice:    0.3e-6,
+			expectedOutputPrice:   1.2e-6,
+			expectedCacheRead:     0.03e-6,
+			expectedCacheCreation: 0.375e-6,
+		},
+		{
+			name:                  "m2-her no caching",
+			model:                 "M2-her",
+			expectedInputPrice:    0.3e-6,
+			expectedOutputPrice:   1.2e-6,
+			expectedCacheRead:     0,
+			expectedCacheCreation: 0,
+		},
+	}
+
+	tokens := UsageTokens{
+		InputTokens:         1000,
+		OutputTokens:        500,
+		CacheCreationTokens: 2000,
+		CacheReadTokens:     3000,
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cost, err := svc.CalculateCost(tt.model, tokens, 1.0)
+			require.NoError(t, err)
+
+			expectedInput := float64(tokens.InputTokens) * tt.expectedInputPrice
+			expectedOutput := float64(tokens.OutputTokens) * tt.expectedOutputPrice
+			expectedCacheCreation := float64(tokens.CacheCreationTokens) * tt.expectedCacheCreation
+			expectedCacheRead := float64(tokens.CacheReadTokens) * tt.expectedCacheRead
+
+			require.InDelta(t, expectedInput, cost.InputCost, 1e-12)
+			require.InDelta(t, expectedOutput, cost.OutputCost, 1e-12)
+			require.InDelta(t, expectedCacheCreation, cost.CacheCreationCost, 1e-12)
+			require.InDelta(t, expectedCacheRead, cost.CacheReadCost, 1e-12)
+			require.InDelta(t, expectedInput+expectedOutput+expectedCacheCreation+expectedCacheRead, cost.TotalCost, 1e-12)
+			require.InDelta(t, cost.TotalCost, cost.ActualCost, 1e-12)
+		})
+	}
+}
+
 func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -208,6 +337,11 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{name: "claude generic model fallback sonnet", model: "claude-foo-bar", expectedInput: 3e-6},
 		{name: "gemini explicit fallback", model: "gemini-3-1-pro", expectedInput: 2e-6},
 		{name: "gemini unknown no fallback", model: "gemini-2.0-pro", expectNilPricing: true},
+		{name: "minimax m2.7 highspeed", model: "minimax-m2.7-highspeed", expectedInput: 0.6e-6},
+		{name: "minimax m2.7 standard", model: "minimax-m2.7", expectedInput: 0.3e-6},
+		{name: "minimax m2.5 highspeed", model: "minimax-m2.5-highspeed", expectedInput: 0.6e-6},
+		{name: "minimax m2.5 standard", model: "minimax-m2.5", expectedInput: 0.3e-6},
+		{name: "m2-her", model: "m2-her", expectedInput: 0.3e-6},
 		{name: "openai gpt5.1", model: "gpt-5.1", expectedInput: 1.25e-6},
 		{name: "openai gpt5.4", model: "gpt-5.4", expectedInput: 2.5e-6},
 		{name: "openai gpt5.3 codex", model: "gpt-5.3-codex", expectedInput: 1.5e-6},
