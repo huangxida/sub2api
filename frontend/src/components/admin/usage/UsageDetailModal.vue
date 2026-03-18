@@ -73,7 +73,7 @@
               </div>
             </div>
 
-            <div v-if="requestHeadersJSON != null" class="flex flex-wrap items-center gap-2">
+            <div v-if="requestHeadersCanShowJSON" class="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
@@ -99,7 +99,7 @@
 
           <div class="mt-4">
             <JsonTreeViewer
-              v-if="requestHeadersViewMode === 'json' && requestHeadersJSON != null"
+              v-if="requestHeadersViewMode === 'json' && requestHeadersCanShowJSON && requestHeadersJSON != null"
               :value="requestHeadersJSON"
               :raw="requestHeadersRaw"
             />
@@ -140,7 +140,7 @@
                 </select>
               </div>
 
-              <template v-if="requestPayloadJSON != null">
+              <template v-if="requestPayloadCanShowJSON">
                 <button
                   type="button"
                   class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
@@ -167,7 +167,7 @@
 
           <div class="mt-4">
             <JsonTreeViewer
-              v-if="requestViewMode === 'json' && requestPayloadJSON != null"
+              v-if="requestViewMode === 'json' && requestPayloadCanShowJSON && requestPayloadJSON != null"
               :value="requestPayloadJSON"
               :raw="requestPayloadRaw"
             />
@@ -194,7 +194,7 @@
               </div>
             </div>
 
-            <div v-if="responseHeadersJSON != null" class="flex flex-wrap items-center gap-2">
+            <div v-if="responseHeadersCanShowJSON" class="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
@@ -220,7 +220,7 @@
 
           <div class="mt-4">
             <JsonTreeViewer
-              v-if="responseHeadersViewMode === 'json' && responseHeadersJSON != null"
+              v-if="responseHeadersViewMode === 'json' && responseHeadersCanShowJSON && responseHeadersJSON != null"
               :value="responseHeadersJSON"
               :raw="responseHeadersRaw"
             />
@@ -261,7 +261,7 @@
                 </select>
               </div>
 
-              <template v-if="responsePayloadJSON != null">
+              <template v-if="responsePayloadCanShowJSON">
                 <button
                   type="button"
                   class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
@@ -288,7 +288,7 @@
 
           <div class="mt-4">
             <JsonTreeViewer
-              v-if="responseViewMode === 'json' && responsePayloadJSON != null"
+              v-if="responseViewMode === 'json' && responsePayloadCanShowJSON && responsePayloadJSON != null"
               :value="responsePayloadJSON"
               :raw="responsePayloadRaw"
             />
@@ -376,25 +376,36 @@ const getPayloadJSON = (payload: UsageDetailPayload | null, frameIndex = 0) => {
   }
 }
 
+const canShowJSONView = (payload: UsageDetailPayload | null, frameIndex = 0) => {
+  if (!payload || !payload.is_json) {
+    return false
+  }
+  return getPayloadRaw(payload, frameIndex).trim().length > 0
+}
+
 const requestHeadersRaw = computed(() => getPayloadRaw(requestHeadersPayload.value))
+const requestHeadersCanShowJSON = computed(() => canShowJSONView(requestHeadersPayload.value))
 const requestHeadersJSON = computed(() => getPayloadJSON(requestHeadersPayload.value))
 
 const requestPayloadRaw = computed(() => getPayloadRaw(requestPayload.value, selectedRequestFrameIndex.value))
+const requestPayloadCanShowJSON = computed(() => canShowJSONView(requestPayload.value, selectedRequestFrameIndex.value))
 const requestPayloadJSON = computed(() => getPayloadJSON(requestPayload.value, selectedRequestFrameIndex.value))
 
 const responseHeadersRaw = computed(() => getPayloadRaw(responseHeadersPayload.value))
+const responseHeadersCanShowJSON = computed(() => canShowJSONView(responseHeadersPayload.value))
 const responseHeadersJSON = computed(() => getPayloadJSON(responseHeadersPayload.value))
 
 const responsePayloadRaw = computed(() => getPayloadRaw(responsePayload.value, selectedResponseFrameIndex.value))
+const responsePayloadCanShowJSON = computed(() => canShowJSONView(responsePayload.value, selectedResponseFrameIndex.value))
 const responsePayloadJSON = computed(() => getPayloadJSON(responsePayload.value, selectedResponseFrameIndex.value))
 
 watch([() => props.show, () => props.detail, activeSection], () => {
   selectedRequestFrameIndex.value = 0
   selectedResponseFrameIndex.value = 0
-  requestHeadersViewMode.value = requestHeadersJSON.value !== null ? 'json' : 'raw'
-  requestViewMode.value = requestPayloadJSON.value !== null ? 'json' : 'raw'
-  responseHeadersViewMode.value = responseHeadersJSON.value !== null ? 'json' : 'raw'
-  responseViewMode.value = responsePayloadJSON.value !== null ? 'json' : 'raw'
+  requestHeadersViewMode.value = requestHeadersCanShowJSON.value ? 'json' : 'raw'
+  requestViewMode.value = requestPayloadCanShowJSON.value ? 'json' : 'raw'
+  responseHeadersViewMode.value = responseHeadersCanShowJSON.value ? 'json' : 'raw'
+  responseViewMode.value = responsePayloadCanShowJSON.value ? 'json' : 'raw'
 }, { immediate: true })
 
 const handleClose = () => {
