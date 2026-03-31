@@ -3274,7 +3274,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					truncateOpenAIWSLogValue(pingErr.Error(), openAIWSLogValueMaxLen),
 				)
 				if forcePreferredConn {
-					if !turnPrevRecoveryTried && currentPreviousResponseID != "" {
+					if hasFunctionCallOutput && currentPreviousResponseID != "" {
+						logOpenAIWSModeInfo(
+							"ingress_ws_preflight_ping_recovery account_id=%d turn=%d conn_id=%s action=reconnect_keep_previous_response_id previous_response_id=%s",
+							account.ID,
+							turn,
+							truncateOpenAIWSLogValue(sessionConnID, openAIWSIDValueMaxLen),
+							truncateOpenAIWSLogValue(currentPreviousResponseID, openAIWSIDValueMaxLen),
+						)
+						forcePreferredConn = false
+					} else if !turnPrevRecoveryTried && currentPreviousResponseID != "" {
 						updatedPayload, removed, dropErr := dropPreviousResponseIDFromRawPayload(currentPayload)
 						if dropErr != nil || !removed {
 							reason := "not_removed"
@@ -3321,12 +3330,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 							}
 						}
 					}
-					resetSessionLease(true)
-					return NewOpenAIWSClientCloseError(
-						coderws.StatusPolicyViolation,
-						"upstream continuation connection is unavailable; please restart the conversation",
-						pingErr,
-					)
+					if forcePreferredConn {
+						resetSessionLease(true)
+						return NewOpenAIWSClientCloseError(
+							coderws.StatusPolicyViolation,
+							"upstream continuation connection is unavailable; please restart the conversation",
+							pingErr,
+						)
+					}
 				}
 				resetSessionLease(true)
 
