@@ -1363,22 +1363,6 @@ func setPreviousResponseIDToRawPayload(payload []byte, previousResponseID string
 	return rebuilt, nil
 }
 
-func shouldInferIngressFunctionCallOutputPreviousResponseID(
-	storeDisabled bool,
-	turn int,
-	hasFunctionCallOutput bool,
-	currentPreviousResponseID string,
-	expectedPreviousResponseID string,
-) bool {
-	if !storeDisabled || turn <= 1 || !hasFunctionCallOutput {
-		return false
-	}
-	if strings.TrimSpace(currentPreviousResponseID) != "" {
-		return false
-	}
-	return strings.TrimSpace(expectedPreviousResponseID) != ""
-}
-
 func alignStoreDisabledPreviousResponseID(
 	payload []byte,
 	expectedPreviousResponseID string,
@@ -3151,40 +3135,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		skipBeforeTurn = false
 		currentPreviousResponseID := openAIWSPayloadStringFromRaw(currentPayload, "previous_response_id")
-		expectedPrev := strings.TrimSpace(lastTurnResponseID)
 		hasFunctionCallOutput := gjson.GetBytes(currentPayload, `input.#(type=="function_call_output")`).Exists()
-		// store=false + function_call_output 场景必须有续链锚点。
-		// 若客户端未传 previous_response_id，优先回填上一轮响应 ID，避免上游报 call_id 无法关联。
-		if shouldInferIngressFunctionCallOutputPreviousResponseID(
-			storeDisabled,
-			turn,
-			hasFunctionCallOutput,
-			currentPreviousResponseID,
-			expectedPrev,
-		) {
-			updatedPayload, setPrevErr := setPreviousResponseIDToRawPayload(currentPayload, expectedPrev)
-			if setPrevErr != nil {
-				logOpenAIWSModeInfo(
-					"ingress_ws_function_call_output_prev_infer_skip account_id=%d turn=%d conn_id=%s reason=set_previous_response_id_error cause=%s expected_previous_response_id=%s",
-					account.ID,
-					turn,
-					truncateOpenAIWSLogValue(sessionConnID, openAIWSIDValueMaxLen),
-					truncateOpenAIWSLogValue(setPrevErr.Error(), openAIWSLogValueMaxLen),
-					truncateOpenAIWSLogValue(expectedPrev, openAIWSIDValueMaxLen),
-				)
-			} else {
-				currentPayload = updatedPayload
-				currentPayloadBytes = len(updatedPayload)
-				currentPreviousResponseID = expectedPrev
-				logOpenAIWSModeInfo(
-					"ingress_ws_function_call_output_prev_infer account_id=%d turn=%d conn_id=%s action=set_previous_response_id previous_response_id=%s",
-					account.ID,
-					turn,
-					truncateOpenAIWSLogValue(sessionConnID, openAIWSIDValueMaxLen),
-					truncateOpenAIWSLogValue(expectedPrev, openAIWSIDValueMaxLen),
-				)
-			}
-		}
+		expectedPrev := strings.TrimSpace(lastTurnResponseID)
+		// function_call_output 不一定代表 continuation。
+		// 中断后的 follow-up full create 也会携带 aborted tool output，此时必须尊重客户端是否显式传入 previous_response_id。
 		nextReplayInput, nextReplayInputExists, replayInputErr := buildOpenAIWSReplayInputSequence(
 			lastTurnReplayInput,
 			lastTurnReplayInputExists,
