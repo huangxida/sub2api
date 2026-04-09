@@ -40,7 +40,6 @@ func ProvideEmailQueueService(emailService *EmailService) *EmailQueueService {
 // ProvideTokenRefreshService creates and starts TokenRefreshService
 func ProvideTokenRefreshService(
 	accountRepo AccountRepository,
-	soraAccountRepo SoraAccountRepository, // Sora 扩展表仓储，用于双表同步
 	oauthService *OAuthService,
 	openaiOAuthService *OpenAIOAuthService,
 	geminiOAuthService *GeminiOAuthService,
@@ -54,8 +53,6 @@ func ProvideTokenRefreshService(
 	refreshAPI *OAuthRefreshAPI,
 ) *TokenRefreshService {
 	svc := NewTokenRefreshService(accountRepo, oauthService, openaiOAuthService, geminiOAuthService, antigravityOAuthService, cacheInvalidator, schedulerCache, cfg, tempUnschedCache)
-	// 注入 Sora 账号扩展表仓储，用于 OpenAI Token 刷新时同步 sora_accounts 表
-	svc.SetSoraAccountRepo(soraAccountRepo)
 	// 注入 OpenAI privacy opt-out 依赖
 	svc.SetPrivacyDeps(privacyClientFactory, proxyRepo)
 	// 注入统一 OAuth 刷新 API（消除 TokenRefreshService 与 TokenProvider 之间的竞争条件）
@@ -281,30 +278,6 @@ func ProvideOpsSystemLogSink(opsRepo OpsRepository) *OpsSystemLogSink {
 	return sink
 }
 
-// ProvideSoraMediaStorage 初始化 Sora 媒体存储
-func ProvideSoraMediaStorage(cfg *config.Config) *SoraMediaStorage {
-	return NewSoraMediaStorage(cfg)
-}
-
-func ProvideSoraSDKClient(
-	cfg *config.Config,
-	httpUpstream HTTPUpstream,
-	tokenProvider *OpenAITokenProvider,
-	accountRepo AccountRepository,
-	soraAccountRepo SoraAccountRepository,
-) *SoraSDKClient {
-	client := NewSoraSDKClient(cfg, httpUpstream, tokenProvider)
-	client.SetAccountRepositories(accountRepo, soraAccountRepo)
-	return client
-}
-
-// ProvideSoraMediaCleanupService 创建并启动 Sora 媒体清理服务
-func ProvideSoraMediaCleanupService(storage *SoraMediaStorage, cfg *config.Config) *SoraMediaCleanupService {
-	svc := NewSoraMediaCleanupService(storage, cfg)
-	svc.Start()
-	return svc
-}
-
 func buildIdempotencyConfig(cfg *config.Config) IdempotencyConfig {
 	idempotencyCfg := DefaultIdempotencyConfig()
 	if cfg != nil {
@@ -385,6 +358,27 @@ func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthC
 	return apiKeyService
 }
 
+// ProvideConfiguredAPIKeyService restores post-construction cache invalidation wiring.
+func ProvideConfiguredAPIKeyService(
+	apiKeyRepo APIKeyRepository,
+	userRepo UserRepository,
+	groupRepo GroupRepository,
+	subRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	apiKeyCache APIKeyCache,
+	billingCache BillingCache,
+	cfg *config.Config,
+) *APIKeyService {
+	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, subRepo, userGroupRateRepo, apiKeyCache, cfg)
+	svc.SetRateLimitCacheInvalidator(billingCache)
+	return svc
+}
+
+// ProvideOAuthRefreshAPI avoids wire resolving the optional variadic refresh intervals.
+func ProvideOAuthRefreshAPI(accountRepo AccountRepository, tokenCache GeminiTokenCache) *OAuthRefreshAPI {
+	return NewOAuthRefreshAPI(accountRepo, tokenCache)
+}
+
 // ProvideBackupService creates and starts BackupService
 func ProvideBackupService(
 	settingRepo SettingRepository,
@@ -402,29 +396,6 @@ func ProvideBackupService(
 func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupRepository, cfg *config.Config) *SettingService {
 	svc := NewSettingService(settingRepo, cfg)
 	svc.SetDefaultSubscriptionGroupReader(groupRepo)
-	return svc
-}
-
-// ProvideConfiguredAPIKeyService restores post-construction cache invalidation wiring.
-func ProvideConfiguredAPIKeyService(
-	apiKeyRepo APIKeyRepository,
-	userRepo UserRepository,
-	groupRepo GroupRepository,
-	subRepo UserSubscriptionRepository,
-	userGroupRateRepo UserGroupRateRepository,
-	apiKeyCache APIKeyCache,
-	billingCache BillingCache,
-	cfg *config.Config,
-) *APIKeyService {
-	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, subRepo, userGroupRateRepo, apiKeyCache, cfg)
-	svc.SetRateLimitCacheInvalidator(billingCache)
-	return svc
-}
-
-// ProvideConfiguredSoraS3Storage re-registers live S3 client refresh on settings updates.
-func ProvideConfiguredSoraS3Storage(settingService *SettingService) *SoraS3Storage {
-	svc := NewSoraS3Storage(settingService)
-	settingService.SetOnS3UpdateCallback(svc.RefreshClient)
 	return svc
 }
 
@@ -449,14 +420,6 @@ var ProviderSet = wire.NewSet(
 	NewAnnouncementService,
 	NewAdminService,
 	NewGatewayService,
-	ProvideSoraMediaStorage,
-	ProvideConfiguredSoraS3Storage,
-	ProvideSoraMediaCleanupService,
-	ProvideSoraSDKClient,
-	wire.Bind(new(SoraClient), new(*SoraSDKClient)),
-	NewSoraGenerationService,
-	NewSoraQuotaService,
-	NewSoraGatewayService,
 	NewOpenAIGatewayService,
 	NewOAuthService,
 	NewOpenAIOAuthService,
@@ -465,7 +428,7 @@ var ProviderSet = wire.NewSet(
 	NewCompositeTokenCacheInvalidator,
 	wire.Bind(new(TokenCacheInvalidator), new(*CompositeTokenCacheInvalidator)),
 	NewAntigravityOAuthService,
-	NewOAuthRefreshAPI,
+	ProvideOAuthRefreshAPI,
 	ProvideGeminiTokenProvider,
 	NewGeminiMessagesCompatService,
 	ProvideAntigravityTokenProvider,
@@ -517,4 +480,6 @@ var ProviderSet = wire.NewSet(
 	ProvideScheduledTestService,
 	ProvideScheduledTestRunnerService,
 	NewGroupCapacityService,
+	NewChannelService,
+	NewModelPricingResolver,
 )

@@ -33,9 +33,14 @@ jobs:
           check-latest: false
           cache-dependency-path: backend/go.sum
       - name: Verify Go version
-        shell: bash
         run: |
-          [[ "$(go version)" == *"go1.26.1"* ]]
+          case "$(go version)" in
+            *"go1.26.2"*) ;;
+            *)
+              echo "unexpected Go version: $(go version)"
+              exit 1
+              ;;
+          esac
       - name: Run govulncheck
         working-directory: backend
         run: |

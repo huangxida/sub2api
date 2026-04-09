@@ -34,6 +34,7 @@
             :show-metric-toggle="true"
             :start-date="startDate"
             :end-date="endDate"
+            :filters="breakdownFilters"
           />
           <GroupDistributionChart
             v-model:metric="groupDistributionMetric"
@@ -42,6 +43,7 @@
             :show-metric-toggle="true"
             :start-date="startDate"
             :end-date="endDate"
+            :filters="breakdownFilters"
           />
         </div>
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -57,6 +59,7 @@
             :title="t('usage.endpointDistribution')"
             :start-date="startDate"
             :end-date="endDate"
+            :filters="breakdownFilters"
           />
           <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
         </div>
@@ -189,6 +192,17 @@ const usageDetail = ref<AdminUsageDetailResponse | null>(null)
 const usageDetailLoading = ref(false)
 const usageDetailError = ref('')
 
+const breakdownFilters = computed(() => {
+  const f: Record<string, any> = {}
+  if (filters.value.user_id) f.user_id = filters.value.user_id
+  if (filters.value.api_key_id) f.api_key_id = filters.value.api_key_id
+  if (filters.value.account_id) f.account_id = filters.value.account_id
+  if (filters.value.group_id) f.group_id = filters.value.group_id
+  if (filters.value.request_type != null) f.request_type = filters.value.request_type
+  if (filters.value.billing_type != null) f.billing_type = filters.value.billing_type
+  return f
+})
+
 const handleUserClick = async (userId: number) => {
   try {
     const user = await adminAPI.users.getById(userId)
@@ -245,7 +259,7 @@ const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
 }
 const defaultDateRange = getDefaultUsageDateRange()
 const startDate = ref(defaultDateRange.startDate); const endDate = ref(defaultDateRange.endDate)
-const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, billing_type: null, start_date: startDate.value, end_date: endDate.value })
+const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, billing_type: null, billing_mode: undefined, start_date: startDate.value, end_date: endDate.value })
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
 
 const getSingleQueryValue = (value: string | null | Array<string | null> | undefined): string | undefined => {
@@ -434,7 +448,7 @@ const resetFilters = () => {
   const defaultDateRange = getDefaultUsageDateRange()
   startDate.value = defaultDateRange.startDate
   endDate.value = defaultDateRange.endDate
-  filters.value = { start_date: startDate.value, end_date: endDate.value, request_type: undefined, billing_type: null }
+  filters.value = { start_date: startDate.value, end_date: endDate.value, request_type: undefined, billing_type: null, billing_mode: undefined }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   applyFilters()
 }
@@ -482,7 +496,7 @@ const exportToExcel = async () => {
         log.input_tokens, log.output_tokens, log.cache_read_tokens, log.cache_creation_tokens,
         log.input_cost?.toFixed(6) || '0.000000', log.output_cost?.toFixed(6) || '0.000000',
         log.cache_read_cost?.toFixed(6) || '0.000000', log.cache_creation_cost?.toFixed(6) || '0.000000',
-        log.rate_multiplier?.toFixed(2) || '1.00', (log.account_rate_multiplier ?? 1).toFixed(2),
+        log.rate_multiplier?.toPrecision(4) || '1.00', (log.account_rate_multiplier ?? 1).toPrecision(4),
         log.total_cost?.toFixed(6) || '0.000000', log.actual_cost?.toFixed(6) || '0.000000',
         (log.total_cost * (log.account_rate_multiplier ?? 1)).toFixed(6), log.first_token_ms ?? '', log.duration_ms,
         log.request_id || '', log.user_agent || '', log.ip_address || ''
@@ -519,6 +533,7 @@ const allColumns = computed(() => [
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
   { key: 'group', label: t('admin.usage.group'), sortable: false },
   { key: 'stream', label: t('usage.type'), sortable: false },
+  { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
   { key: 'tokens', label: t('usage.tokens'), sortable: false },
   { key: 'cost', label: t('usage.cost'), sortable: false },
   { key: 'first_token', label: t('usage.firstToken'), sortable: false },

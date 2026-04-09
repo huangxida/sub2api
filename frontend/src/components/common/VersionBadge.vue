@@ -374,8 +374,8 @@
     </template>
 
     <!-- Non-admin: Simple static version text -->
-    <span v-else-if="version" class="text-xs text-gray-500 dark:text-dark-400">
-      v{{ version }}
+    <span v-else-if="displayVersion" class="text-xs text-gray-500 dark:text-dark-400">
+      v{{ displayVersion }}
     </span>
   </div>
 </template>
@@ -401,10 +401,15 @@ const isAdmin = computed(() => authStore.isAdmin)
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 
+function normalizeVersion(version: string): string {
+  return version.replace(/^v+/i, '')
+}
+
 // Use store's cached version state
 const loading = computed(() => appStore.versionLoading)
-const currentVersion = computed(() => appStore.currentVersion || props.version || '')
-const latestVersion = computed(() => appStore.latestVersion)
+const currentVersion = computed(() => normalizeVersion(appStore.currentVersion || props.version || ''))
+const latestVersion = computed(() => normalizeVersion(appStore.latestVersion))
+const displayVersion = computed(() => normalizeVersion(props.version || ''))
 const hasUpdate = computed(() => appStore.hasUpdate)
 const releaseInfo = computed(() => appStore.releaseInfo)
 const buildType = computed(() => appStore.buildType)

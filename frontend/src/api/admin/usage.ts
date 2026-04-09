@@ -86,6 +86,7 @@ export interface CreateUsageCleanupTaskRequest {
 export interface AdminUsageQueryParams extends UsageQueryParams {
   user_id?: number
   exact_total?: boolean
+  billing_mode?: string
 }
 
 export async function getDetail(usageLogID: number): Promise<AdminUsageDetailResponse> {

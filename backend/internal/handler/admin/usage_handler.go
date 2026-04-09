@@ -113,6 +113,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 	}
 
 	model := c.Query("model")
+	billingMode := strings.TrimSpace(c.Query("billing_mode"))
 
 	var requestType *int16
 	var stream *bool
@@ -177,6 +178,7 @@ func (h *UsageHandler) List(c *gin.Context) {
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
+		BillingMode: billingMode,
 		StartTime:   startTime,
 		EndTime:     endTime,
 		ExactTotal:  exactTotal,
@@ -270,6 +272,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 	}
 
 	model := c.Query("model")
+	billingMode := strings.TrimSpace(c.Query("billing_mode"))
 
 	var requestType *int16
 	var stream *bool
@@ -348,6 +351,7 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
+		BillingMode: billingMode,
 		StartTime:   &startTime,
 		EndTime:     &endTime,
 	}
