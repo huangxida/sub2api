@@ -27,6 +27,7 @@ jobs:
           go-version-file: backend/go.mod
           check-latest: false
           cache: true
+          cache-dependency-path: backend/go.sum
       - name: Verify Go version
         run: |
           case "$(go version)" in
@@ -52,6 +53,7 @@ jobs:
           go-version-file: backend/go.mod
           check-latest: false
           cache: true
+          cache-dependency-path: backend/go.sum
       - name: Verify Go version
         run: |
           case "$(go version)" in
