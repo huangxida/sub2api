@@ -177,6 +177,57 @@
             />
           </div>
         </div>
+
+        <div v-if="finalRequestPayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
+          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div class="space-y-2">
+              <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.finalRequestBody') }}</div>
+              <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
+                <span>{{ t('admin.usage.detail.contentType') }}: {{ finalRequestPayload.content_type || '-' }}</span>
+                <span>{{ t('admin.usage.detail.sizeBytes') }}: {{ finalRequestPayload.size_bytes }}</span>
+                <span v-if="finalRequestPayload.complete != null">
+                  {{ t('admin.usage.detail.complete') }}:
+                  {{ finalRequestPayload.complete ? t('common.yes') : t('common.no') }}
+                </span>
+              </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2" v-if="finalRequestPayloadCanShowJSON">
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                :class="finalRequestViewMode === 'json'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                @click="finalRequestViewMode = 'json'"
+              >
+                {{ t('admin.usage.detail.jsonView') }}
+              </button>
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                :class="finalRequestViewMode === 'raw'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                @click="finalRequestViewMode = 'raw'"
+              >
+                {{ t('admin.usage.detail.rawView') }}
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <JsonTreeViewer
+              v-if="finalRequestViewMode === 'json' && finalRequestPayloadCanShowJSON && finalRequestPayloadJSON != null"
+              :value="finalRequestPayloadJSON"
+              :raw="finalRequestPayloadRaw"
+            />
+            <TextSearchViewer
+              v-else
+              :content="finalRequestPayloadRaw"
+            />
+          </div>
+        </div>
       </div>
 
       <div v-else class="space-y-4">
@@ -330,6 +381,7 @@ const { t } = useI18n()
 const activeSection = ref<'request' | 'response'>('request')
 const requestHeadersViewMode = ref<ViewMode>('json')
 const requestViewMode = ref<ViewMode>('json')
+const finalRequestViewMode = ref<ViewMode>('json')
 const responseHeadersViewMode = ref<ViewMode>('json')
 const responseViewMode = ref<ViewMode>('json')
 const selectedRequestFrameIndex = ref(0)
@@ -345,6 +397,7 @@ const requestTypeLabel = computed(() => {
 
 const requestHeadersPayload = computed<UsageDetailPayload | null>(() => props.detail?.request_headers || null)
 const requestPayload = computed<UsageDetailPayload | null>(() => props.detail?.request || null)
+const finalRequestPayload = computed<UsageDetailPayload | null>(() => props.detail?.final_request || null)
 const responseHeadersPayload = computed<UsageDetailPayload | null>(() => props.detail?.response_headers || null)
 const responsePayload = computed<UsageDetailPayload | null>(() => props.detail?.response || null)
 
@@ -391,6 +444,10 @@ const requestPayloadRaw = computed(() => getPayloadRaw(requestPayload.value, sel
 const requestPayloadCanShowJSON = computed(() => canShowJSONView(requestPayload.value, selectedRequestFrameIndex.value))
 const requestPayloadJSON = computed(() => getPayloadJSON(requestPayload.value, selectedRequestFrameIndex.value))
 
+const finalRequestPayloadRaw = computed(() => getPayloadRaw(finalRequestPayload.value))
+const finalRequestPayloadCanShowJSON = computed(() => canShowJSONView(finalRequestPayload.value))
+const finalRequestPayloadJSON = computed(() => getPayloadJSON(finalRequestPayload.value))
+
 const responseHeadersRaw = computed(() => getPayloadRaw(responseHeadersPayload.value))
 const responseHeadersCanShowJSON = computed(() => canShowJSONView(responseHeadersPayload.value))
 const responseHeadersJSON = computed(() => getPayloadJSON(responseHeadersPayload.value))
@@ -404,6 +461,7 @@ watch([() => props.show, () => props.detail, activeSection], () => {
   selectedResponseFrameIndex.value = 0
   requestHeadersViewMode.value = requestHeadersCanShowJSON.value ? 'json' : 'raw'
   requestViewMode.value = requestPayloadCanShowJSON.value ? 'json' : 'raw'
+  finalRequestViewMode.value = finalRequestPayloadCanShowJSON.value ? 'json' : 'raw'
   responseHeadersViewMode.value = responseHeadersCanShowJSON.value ? 'json' : 'raw'
   responseViewMode.value = responsePayloadCanShowJSON.value ? 'json' : 'raw'
 }, { immediate: true })

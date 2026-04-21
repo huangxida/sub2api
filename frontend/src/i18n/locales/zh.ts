@@ -3626,6 +3626,7 @@ export default {
         responseTab: '响应',
         requestHeaders: '请求头',
         requestBody: '请求体',
+        finalRequestBody: '最终请求参数',
         noRequestHeaders: '该记录未采集请求头',
         responseHeaders: '响应头',
         responseBody: '响应体',

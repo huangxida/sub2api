@@ -676,6 +676,18 @@ func AdminUsageDetailFromService(log *service.UsageLog, detail *service.UsageLog
 		}
 	}
 
+	if detail.FinalRequestBody != nil || detail.FinalRequestContentType != nil || detail.FinalRequestBytes > 0 {
+		complete := detail.FinalRequestComplete
+		resp.FinalRequest = &UsageDetailPayload{
+			Kind:        "body",
+			ContentType: detail.FinalRequestContentType,
+			SizeBytes:   detail.FinalRequestBytes,
+			IsJSON:      detail.FinalRequestIsJSON,
+			Complete:    &complete,
+			Body:        detail.FinalRequestBody,
+		}
+	}
+
 	if detail.ResponseHeaders != nil {
 		contentType := "application/json"
 		complete := true

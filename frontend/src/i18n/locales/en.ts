@@ -3468,6 +3468,7 @@ export default {
         responseTab: 'Response',
         requestHeaders: 'Request Headers',
         requestBody: 'Request Body',
+        finalRequestBody: 'Final Request Params',
         noRequestHeaders: 'Request headers were not captured for this record',
         responseHeaders: 'Response Headers',
         responseBody: 'Response Body',

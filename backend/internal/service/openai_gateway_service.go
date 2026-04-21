@@ -227,21 +227,26 @@ type OpenAIForwardResult struct {
 	ServiceTier *string
 	// ReasoningEffort is extracted from request body (reasoning.effort) or derived from model suffix.
 	// Stored for usage records display; nil means not provided / not applicable.
-	ReasoningEffort     *string
-	Stream              bool
-	OpenAIWSMode        bool
-	ResponseHeaders     http.Header
-	Duration            time.Duration
-	FirstTokenMs        *int
-	RequestBody         []byte
-	RequestBytes        int64
-	RequestComplete     bool
-	RequestContentType  string
-	ResponseBody        []byte
-	ResponseFrames      [][]byte
-	ResponseBytes       int64
-	ResponseContentType string
-	ResponseComplete    bool
+	ReasoningEffort         *string
+	Stream                  bool
+	OpenAIWSMode            bool
+	ResponseHeaders         http.Header
+	Duration                time.Duration
+	FirstTokenMs            *int
+	RequestBody             []byte
+	RequestBytes            int64
+	RequestComplete         bool
+	RequestContentType      string
+	FinalRequestBody        []byte
+	FinalRequestBytes       int64
+	FinalRequestComplete    bool
+	FinalRequestContentType string
+	FinalRequestTransformed bool
+	ResponseBody            []byte
+	ResponseFrames          [][]byte
+	ResponseBytes           int64
+	ResponseContentType     string
+	ResponseComplete        bool
 }
 
 type OpenAIWSRetryMetricsSnapshot struct {
@@ -2441,16 +2446,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		serviceTier := extractOpenAIServiceTier(reqBody)
 
 		return &OpenAIForwardResult{
-			RequestID:       resp.Header.Get("x-request-id"),
-			Usage:           *usage,
-			Model:           originalModel,
-			UpstreamModel:   upstreamModel,
-			ServiceTier:     serviceTier,
-			ReasoningEffort: reasoningEffort,
-			Stream:          reqStream,
-			OpenAIWSMode:    false,
-			Duration:        time.Since(startTime),
-			FirstTokenMs:    firstTokenMs,
+			RequestID:               resp.Header.Get("x-request-id"),
+			Usage:                   *usage,
+			Model:                   originalModel,
+			UpstreamModel:           upstreamModel,
+			ServiceTier:             serviceTier,
+			ReasoningEffort:         reasoningEffort,
+			Stream:                  reqStream,
+			OpenAIWSMode:            false,
+			Duration:                time.Since(startTime),
+			FirstTokenMs:            firstTokenMs,
+			FinalRequestBody:        body,
+			FinalRequestBytes:       int64(len(body)),
+			FinalRequestComplete:    true,
+			FinalRequestContentType: "application/json",
+			FinalRequestTransformed: bodyModified,
 		}, nil
 	}
 }
@@ -2465,6 +2475,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	reqStream bool,
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
+	normalized := false
 	if account != nil && account.Type == AccountTypeOAuth {
 		if rejectReason := detectOpenAIPassthroughInstructionsRejectReason(reqModel, body); rejectReason != "" {
 			rejectMsg := "OpenAI codex passthrough requires a non-empty instructions field"
@@ -2489,13 +2500,14 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, fmt.Errorf("openai passthrough rejected before upstream: %s", rejectReason)
 		}
 
-		normalizedBody, normalized, err := normalizeOpenAIPassthroughOAuthBody(body, isOpenAIResponsesCompactPath(c))
+		normalizedBody, bodyNormalized, err := normalizeOpenAIPassthroughOAuthBody(body, isOpenAIResponsesCompactPath(c))
 		if err != nil {
 			return nil, err
 		}
-		if normalized {
+		if bodyNormalized {
 			body = normalizedBody
 		}
+		normalized = bodyNormalized
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 	}
 
@@ -2612,15 +2624,20 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	}
 
 	return &OpenAIForwardResult{
-		RequestID:       resp.Header.Get("x-request-id"),
-		Usage:           *usage,
-		Model:           reqModel,
-		ServiceTier:     extractOpenAIServiceTierFromBody(body),
-		ReasoningEffort: reasoningEffort,
-		Stream:          reqStream,
-		OpenAIWSMode:    false,
-		Duration:        time.Since(startTime),
-		FirstTokenMs:    firstTokenMs,
+		RequestID:               resp.Header.Get("x-request-id"),
+		Usage:                   *usage,
+		Model:                   reqModel,
+		ServiceTier:             extractOpenAIServiceTierFromBody(body),
+		ReasoningEffort:         reasoningEffort,
+		Stream:                  reqStream,
+		OpenAIWSMode:            false,
+		Duration:                time.Since(startTime),
+		FirstTokenMs:            firstTokenMs,
+		FinalRequestBody:        body,
+		FinalRequestBytes:       int64(len(body)),
+		FinalRequestComplete:    true,
+		FinalRequestContentType: "application/json",
+		FinalRequestTransformed: normalized || sanitized,
 	}, nil
 }
 
@@ -4391,28 +4408,33 @@ func (s *OpenAIGatewayService) replaceModelInResponseBody(body []byte, fromModel
 
 // OpenAIRecordUsageInput input for recording usage
 type OpenAIRecordUsageInput struct {
-	Result              *OpenAIForwardResult
-	APIKey              *APIKey
-	User                *User
-	Account             *Account
-	Subscription        *UserSubscription
-	InboundEndpoint     string
-	UpstreamEndpoint    string
-	UserAgent           string // 请求的 User-Agent
-	IPAddress           string // 请求的客户端 IP 地址
-	RequestHeaders      http.Header
-	RequestBody         []byte
-	RequestBytes        int64
-	RequestComplete     bool
-	RequestContentType  string
-	ResponseHeaders     http.Header
-	ResponseBody        []byte
-	ResponseFrames      [][]byte
-	ResponseBytes       int64
-	ResponseContentType string
-	ResponseComplete    bool
-	RequestPayloadHash  string
-	APIKeyService       APIKeyQuotaUpdater
+	Result                  *OpenAIForwardResult
+	APIKey                  *APIKey
+	User                    *User
+	Account                 *Account
+	Subscription            *UserSubscription
+	InboundEndpoint         string
+	UpstreamEndpoint        string
+	UserAgent               string // 请求的 User-Agent
+	IPAddress               string // 请求的客户端 IP 地址
+	RequestHeaders          http.Header
+	RequestBody             []byte
+	RequestBytes            int64
+	RequestComplete         bool
+	RequestContentType      string
+	FinalRequestBody        []byte
+	FinalRequestBytes       int64
+	FinalRequestComplete    bool
+	FinalRequestContentType string
+	FinalRequestTransformed bool
+	ResponseHeaders         http.Header
+	ResponseBody            []byte
+	ResponseFrames          [][]byte
+	ResponseBytes           int64
+	ResponseContentType     string
+	ResponseComplete        bool
+	RequestPayloadHash      string
+	APIKeyService           APIKeyQuotaUpdater
 	ChannelUsageFields
 }
 
@@ -4623,19 +4645,24 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		responseHeaders = result.ResponseHeaders
 	}
 	detailInput := UsageLogDetailSaveInput{
-		RequestID:           requestID,
-		APIKeyID:            apiKey.ID,
-		RequestHeaders:      input.RequestHeaders,
-		RequestBody:         requestBody,
-		RequestBytes:        requestBytes,
-		RequestContentType:  requestContentType,
-		RequestComplete:     requestComplete,
-		ResponseHeaders:     responseHeaders,
-		ResponseBody:        responseBody,
-		ResponseFrames:      responseFrames,
-		ResponseBytes:       responseBytes,
-		ResponseContentType: responseContentType,
-		ResponseComplete:    responseComplete,
+		RequestID:               requestID,
+		APIKeyID:                apiKey.ID,
+		RequestHeaders:          input.RequestHeaders,
+		RequestBody:             requestBody,
+		RequestBytes:            requestBytes,
+		RequestContentType:      requestContentType,
+		RequestComplete:         requestComplete,
+		FinalRequestBody:        result.FinalRequestBody,
+		FinalRequestBytes:       result.FinalRequestBytes,
+		FinalRequestContentType: result.FinalRequestContentType,
+		FinalRequestComplete:    result.FinalRequestComplete,
+		FinalRequestTransformed: result.FinalRequestTransformed,
+		ResponseHeaders:         responseHeaders,
+		ResponseBody:            responseBody,
+		ResponseFrames:          responseFrames,
+		ResponseBytes:           responseBytes,
+		ResponseContentType:     responseContentType,
+		ResponseComplete:        responseComplete,
 	}
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
