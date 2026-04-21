@@ -1,36 +1,49 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_run:
+    workflows:
+      - Build & Deploy sub2api to los3
+    types:
+      - completed
 
 permissions:
   contents: write
 
 jobs:
   release:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
     name: Create source release
     runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ github.event.workflow_run.head_branch }}
+      TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
+          ref: ${{ env.TARGET_SHA }}
           fetch-depth: 0
+
+      - name: Fetch tags
+        shell: bash
+        run: git fetch --force --tags origin
 
       - name: Generate release notes
         shell: bash
         run: |
-          prev_tag="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          prev_tag="$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || true)"
           {
-            echo "## Release ${GITHUB_REF_NAME}"
+            echo "## Release ${TAG_NAME}"
             echo
-            echo "Automated source release for tag \`${GITHUB_REF_NAME}\`."
+            echo "Automated source release for tag \`${TAG_NAME}\`."
             echo
             if [ -n "$prev_tag" ]; then
               echo "Changes since \`${prev_tag}\`:"
               echo
-              git log "${prev_tag}..HEAD" --pretty=format:"- %s (%h)"
+              git log "${prev_tag}..${TARGET_SHA}" --pretty=format:"- %s (%h)"
             else
               echo "Initial tagged release in this repository."
             fi
@@ -39,7 +52,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          name: ${{ github.ref_name }}
+          tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ env.TARGET_SHA }}
+          name: ${{ env.TAG_NAME }}
           body_path: release_notes.md
           draft: false
           prerelease: false
