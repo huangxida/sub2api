@@ -1,0 +1,107 @@
+name: Build & Deploy sub2api to los3
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: deploy-sub2api
+  cancel-in-progress: false
+
+env:
+  HOST: los3
+  IMAGE: xidahuang/sub2api
+  TARBALL: /tmp/sub2api-image.tar.gz
+  REMOTE_TARBALL: /tmp/sub2api-incoming.tar.gz
+  REMOTE_COMPOSE_DIR: /root/sub2api
+  IMAGE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
+
+jobs:
+  build-deploy:
+    runs-on: [self-hosted, ca1]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Build image on ca1
+        shell: bash
+        run: |
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+
+          docker build \
+            --build-arg VERSION="${IMAGE_VERSION}" \
+            --build-arg COMMIT="${SHORT_SHA}" \
+            --build-arg DATE="${BUILD_DATE}" \
+            --build-arg GOPROXY="https://goproxy.cn,direct" \
+            --build-arg GOSUMDB="sum.golang.google.cn" \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:${IMAGE_VERSION}" \
+            .
+
+          docker images "$IMAGE" | head -5
+
+      - name: Save image to tarball
+        shell: bash
+        run: |
+          rm -f "$TARBALL"
+          docker save "$IMAGE:latest" | gzip -1 > "$TARBALL"
+          ls -lh "$TARBALL"
+
+      - name: Transfer to $HOST
+        shell: bash
+        run: |
+          scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "$TARBALL" "$HOST:$REMOTE_TARBALL"
+
+      - name: Load & restart on $HOST
+        shell: bash
+        run: |
+          ssh -o ConnectTimeout=15 "$HOST" "bash -s" <<'REMOTE'
+          set -euo pipefail
+          trap 'rm -f "/tmp/sub2api-incoming.tar.gz"' EXIT
+          cd "/root/sub2api"
+
+          echo "[los3] loading image..."
+          docker load < "/tmp/sub2api-incoming.tar.gz"
+
+          echo "[los3] compose up -d --no-build..."
+          docker compose up -d --no-build
+
+          echo "[los3] waiting for sub2api health..."
+          for attempt in $(seq 1 30); do
+            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' sub2api 2>/dev/null || echo missing)"
+            if [ "$status" = "healthy" ]; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "sub2api container did not become healthy in time (last status: $status)"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "[los3] pruning dangling..."
+          docker image prune -f
+
+          echo "[los3] status:"
+          docker ps --filter name=sub2api --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+          REMOTE
+
+      - name: Cleanup tar on ca1
+        if: always()
+        shell: bash
+        run: rm -f "$TARBALL"
+
+      - name: Prune old image tags on ca1 (keep latest + 3 recent non-latest tags)
+        if: success()
+        shell: bash
+        run: |
+          docker images "$IMAGE" --format '{{.Tag}} {{.CreatedAt}}' \
+            | awk '$1 != "latest" { print }' \
+            | sort -k2 -r \
+            | awk 'NR>3 {print $1}' \
+            | xargs -r -I{} docker rmi "$IMAGE:{}" 2>/dev/null || true
