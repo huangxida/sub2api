@@ -27,13 +27,42 @@ jobs:
           go-version-file: backend/go.mod
           check-latest: false
           cache: true
+          cache-dependency-path: backend/go.sum
       - name: Verify Go version
-        shell: bash
         run: |
-          [[ "$(go version)" == *"go1.26.1"* ]]
+          case "$(go version)" in
+            *"go1.26.2"*) ;;
+            *)
+              echo "unexpected Go version: $(go version)"
+              exit 1
+              ;;
+          esac
       - name: Unit tests
         working-directory: backend
         run: make test-unit
+      - name: Integration tests
+        working-directory: backend
+        run: make test-integration
+
+  golangci-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Verify Go version
+        run: |
+          case "$(go version)" in
+            *"go1.26.2"*) ;;
+            *)
+              echo "unexpected Go version: $(go version)"
+              exit 1
+              ;;
+          esac
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
