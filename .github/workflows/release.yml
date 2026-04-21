@@ -4,75 +4,43 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release (e.g. v1.5.0)"
-        required: true
-        type: string
 
 permissions:
-  contents: read
-
-concurrency:
-  group: release-${{ github.event.inputs.tag || github.ref }}
-  cancel-in-progress: true
+  contents: write
 
 jobs:
-  docker-amd64:
-    name: Build amd64 Docker image
+  release:
+    name: Create source release
     runs-on: ubuntu-latest
-    timeout-minutes: 60
-    env:
-      IMAGE_REPO: ${{ secrets.DOCKERHUB_USERNAME }}/sub2api
     steps:
-      - name: Resolve tag and version
-        id: meta
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RAW_TAG="${{ github.event.inputs.tag }}"
-          else
-            RAW_TAG="${GITHUB_REF#refs/tags/}"
-          fi
-
-          VERSION="${RAW_TAG#v}"
-
-          if [ -z "${RAW_TAG}" ] || [ -z "${VERSION}" ]; then
-            echo "Failed to resolve release tag/version"
-            exit 1
-          fi
-
-          echo "raw_tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout tag
+      - name: Checkout repository
         uses: actions/checkout@v6
         with:
-          ref: ${{ steps.meta.outputs.raw_tag }}
+          fetch-depth: 0
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Build and push latest amd64 image
+      - name: Generate release notes
         shell: bash
         run: |
-          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          SHORT_SHA="$(git rev-parse --short HEAD)"
+          prev_tag="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          {
+            echo "## Release ${GITHUB_REF_NAME}"
+            echo
+            echo "Automated source release for tag \`${GITHUB_REF_NAME}\`."
+            echo
+            if [ -n "$prev_tag" ]; then
+              echo "Changes since \`${prev_tag}\`:"
+              echo
+              git log "${prev_tag}..HEAD" --pretty=format:"- %s (%h)"
+            else
+              echo "Initial tagged release in this repository."
+            fi
+          } > release_notes.md
 
-          docker buildx build \
-            --platform linux/amd64 \
-            --push \
-            --tag "${IMAGE_REPO}:latest" \
-            --build-arg VERSION="${{ steps.meta.outputs.version }}" \
-            --build-arg COMMIT="${SHORT_SHA}" \
-            --build-arg DATE="${BUILD_DATE}" \
-            --build-arg GOPROXY="https://goproxy.cn,direct" \
-            --build-arg GOSUMDB="sum.golang.google.cn" \
-            .
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: true
