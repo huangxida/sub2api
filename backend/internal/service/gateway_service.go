@@ -7655,11 +7655,13 @@ func saveUsageLogDetailBestEffort(
 	input UsageLogDetailSaveInput,
 	logKey string,
 ) {
-	if !enabled || service == nil || usageLog == nil || usageLog.ID <= 0 {
+	if !enabled || service == nil || usageLog == nil {
 		return
 	}
 
-	input.UsageLogID = usageLog.ID
+	if usageLog.ID > 0 {
+		input.UsageLogID = usageLog.ID
+	}
 	detailCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
 
