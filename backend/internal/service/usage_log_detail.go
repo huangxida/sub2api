@@ -217,21 +217,6 @@ func rawBytesToOptionalString(raw []byte) *string {
 	return &value
 }
 
-func transformedRawBytesToOptionalString(raw []byte, transformed bool) *string {
-	if !transformed || raw == nil {
-		return nil
-	}
-	value := string(raw)
-	return &value
-}
-
-func normalizeOptionalStringWhen(value string, condition bool) *string {
-	if !condition {
-		return nil
-	}
-	return normalizeOptionalString(value)
-}
-
 func rawFramesToStrings(frames [][]byte) []string {
 	if len(frames) == 0 {
 		return nil
