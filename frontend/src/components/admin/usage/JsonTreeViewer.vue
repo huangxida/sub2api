@@ -311,6 +311,7 @@ const setEditorValue = (value: unknown) => {
   }
 
   editor.update(value)
+  editor.collapseAll()
   if (searchQuery.value.trim()) {
     editor.search(searchQuery.value.trim())
   }

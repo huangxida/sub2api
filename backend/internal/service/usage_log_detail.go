@@ -102,7 +102,7 @@ func (s *UsageLogDetailService) Save(ctx context.Context, input UsageLogDetailSa
 		RequestBytes:            normalizeObservedBytes(input.RequestBytes, input.RequestBody, nil),
 		RequestIsJSON:           input.RequestComplete && len(input.RequestBody) > 0 && json.Valid(input.RequestBody),
 		RequestComplete:         input.RequestComplete,
-		FinalRequestBody:        transformedRawBytesToOptionalString(input.FinalRequestBody, input.FinalRequestTransformed),
+		FinalRequestBody:        rawBytesToOptionalString(input.FinalRequestBody),
 		FinalRequestBytes:       normalizeObservedBytes(input.FinalRequestBytes, input.FinalRequestBody, nil),
 		FinalRequestIsJSON:      input.FinalRequestComplete && len(input.FinalRequestBody) > 0 && json.Valid(input.FinalRequestBody),
 		FinalRequestComplete:    input.FinalRequestComplete,
@@ -113,7 +113,7 @@ func (s *UsageLogDetailService) Save(ctx context.Context, input UsageLogDetailSa
 		ResponseIsJSON:          input.ResponseComplete && len(input.ResponseFrames) == 0 && len(input.ResponseBody) > 0 && json.Valid(input.ResponseBody),
 		ResponseComplete:        input.ResponseComplete,
 		RequestContentType:      normalizeOptionalString(input.RequestContentType),
-		FinalRequestContentType: normalizeOptionalStringWhen(input.FinalRequestContentType, input.FinalRequestTransformed),
+		FinalRequestContentType: normalizeOptionalString(input.FinalRequestContentType),
 		ResponseContentType:     normalizeOptionalString(input.ResponseContentType),
 	}
 

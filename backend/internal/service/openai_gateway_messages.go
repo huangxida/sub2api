@@ -237,6 +237,11 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
 	if handleErr == nil && result != nil {
+		result.FinalRequestBody = responsesBody
+		result.FinalRequestBytes = int64(len(responsesBody))
+		result.FinalRequestContentType = "application/json"
+		result.FinalRequestComplete = true
+		result.FinalRequestTransformed = true
 		if responsesReq.ServiceTier != "" {
 			st := responsesReq.ServiceTier
 			result.ServiceTier = &st
