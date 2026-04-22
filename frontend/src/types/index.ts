@@ -1090,6 +1090,7 @@ export interface AdminUsageDetailResponse {
   created_at: string
   request_headers?: UsageDetailPayload | null
   request?: UsageDetailPayload | null
+  final_request?: UsageDetailPayload | null
   response_headers?: UsageDetailPayload | null
   response?: UsageDetailPayload | null
 }

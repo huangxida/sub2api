@@ -449,6 +449,7 @@ type AdminUsageDetailResponse struct {
 	CreatedAt       time.Time           `json:"created_at"`
 	RequestHeaders  *UsageDetailPayload `json:"request_headers,omitempty"`
 	Request         *UsageDetailPayload `json:"request,omitempty"`
+	FinalRequest    *UsageDetailPayload `json:"final_request,omitempty"`
 	ResponseHeaders *UsageDetailPayload `json:"response_headers,omitempty"`
 	Response        *UsageDetailPayload `json:"response,omitempty"`
 }

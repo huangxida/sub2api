@@ -60,8 +60,13 @@
 
       <div v-else-if="activeSection === 'request'" class="space-y-4">
         <div v-if="requestHeadersPayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div class="space-y-2">
+          <button
+            type="button"
+            class="flex w-full items-start justify-between gap-3 text-left"
+            :aria-expanded="isSectionExpanded('requestHeaders')"
+            @click="toggleSection('requestHeaders')"
+          >
+            <div class="min-w-0 space-y-2">
               <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.requestHeaders') }}</div>
               <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
                 <span>{{ t('admin.usage.detail.contentType') }}: {{ requestHeadersPayload.content_type || '-' }}</span>
@@ -72,7 +77,12 @@
                 </span>
               </div>
             </div>
+            <span class="mt-0.5 shrink-0 text-lg text-gray-400 dark:text-gray-500">
+              {{ isSectionExpanded('requestHeaders') ? '▾' : '▸' }}
+            </span>
+          </button>
 
+          <div v-if="isSectionExpanded('requestHeaders')" class="mt-4 space-y-3">
             <div v-if="requestHeadersCanShowJSON" class="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -95,9 +105,7 @@
                 {{ t('admin.usage.detail.rawView') }}
               </button>
             </div>
-          </div>
 
-          <div class="mt-4">
             <JsonTreeViewer
               v-if="requestHeadersViewMode === 'json' && requestHeadersCanShowJSON && requestHeadersJSON != null"
               :value="requestHeadersJSON"
@@ -115,8 +123,13 @@
         </div>
 
         <div v-if="requestPayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div class="space-y-2">
+          <button
+            type="button"
+            class="flex w-full items-start justify-between gap-3 text-left"
+            :aria-expanded="isSectionExpanded('requestBody')"
+            @click="toggleSection('requestBody')"
+          >
+            <div class="min-w-0 space-y-2">
               <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.requestBody') }}</div>
               <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
                 <span>{{ t('admin.usage.detail.contentType') }}: {{ requestPayload.content_type || '-' }}</span>
@@ -127,7 +140,12 @@
                 </span>
               </div>
             </div>
+            <span class="mt-0.5 shrink-0 text-lg text-gray-400 dark:text-gray-500">
+              {{ isSectionExpanded('requestBody') ? '▾' : '▸' }}
+            </span>
+          </button>
 
+          <div v-if="isSectionExpanded('requestBody')" class="mt-4 space-y-3">
             <div class="flex flex-wrap items-center gap-2">
               <div v-if="requestPayload.kind === 'frames'" class="flex items-center gap-2">
                 <label class="text-sm text-gray-600 dark:text-gray-300" for="request-frame-select">
@@ -163,9 +181,7 @@
                 </button>
               </template>
             </div>
-          </div>
 
-          <div class="mt-4">
             <JsonTreeViewer
               v-if="requestViewMode === 'json' && requestPayloadCanShowJSON && requestPayloadJSON != null"
               :value="requestPayloadJSON"
@@ -177,12 +193,76 @@
             />
           </div>
         </div>
+
+        <div v-if="finalRequestPayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
+          <button
+            type="button"
+            class="flex w-full items-start justify-between gap-3 text-left"
+            :aria-expanded="isSectionExpanded('finalRequestBody')"
+            @click="toggleSection('finalRequestBody')"
+          >
+            <div class="min-w-0 space-y-2">
+              <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.finalRequestBody') }}</div>
+              <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
+                <span>{{ t('admin.usage.detail.contentType') }}: {{ finalRequestPayload.content_type || '-' }}</span>
+                <span>{{ t('admin.usage.detail.sizeBytes') }}: {{ finalRequestPayload.size_bytes }}</span>
+                <span v-if="finalRequestPayload.complete != null">
+                  {{ t('admin.usage.detail.complete') }}:
+                  {{ finalRequestPayload.complete ? t('common.yes') : t('common.no') }}
+                </span>
+              </div>
+            </div>
+            <span class="mt-0.5 shrink-0 text-lg text-gray-400 dark:text-gray-500">
+              {{ isSectionExpanded('finalRequestBody') ? '▾' : '▸' }}
+            </span>
+          </button>
+
+          <div v-if="isSectionExpanded('finalRequestBody')" class="mt-4 space-y-3">
+            <div class="flex flex-wrap items-center gap-2" v-if="finalRequestPayloadCanShowJSON">
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                :class="finalRequestViewMode === 'json'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                @click="finalRequestViewMode = 'json'"
+              >
+                {{ t('admin.usage.detail.jsonView') }}
+              </button>
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
+                :class="finalRequestViewMode === 'raw'
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600'"
+                @click="finalRequestViewMode = 'raw'"
+              >
+                {{ t('admin.usage.detail.rawView') }}
+              </button>
+            </div>
+
+            <JsonTreeViewer
+              v-if="finalRequestViewMode === 'json' && finalRequestPayloadCanShowJSON && finalRequestPayloadJSON != null"
+              :value="finalRequestPayloadJSON"
+              :raw="finalRequestPayloadRaw"
+            />
+            <TextSearchViewer
+              v-else
+              :content="finalRequestPayloadRaw"
+            />
+          </div>
+        </div>
       </div>
 
       <div v-else class="space-y-4">
         <div v-if="responseHeadersPayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div class="space-y-2">
+          <button
+            type="button"
+            class="flex w-full items-start justify-between gap-3 text-left"
+            :aria-expanded="isSectionExpanded('responseHeaders')"
+            @click="toggleSection('responseHeaders')"
+          >
+            <div class="min-w-0 space-y-2">
               <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.responseHeaders') }}</div>
               <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
                 <span>{{ t('admin.usage.detail.contentType') }}: {{ responseHeadersPayload.content_type || '-' }}</span>
@@ -193,7 +273,12 @@
                 </span>
               </div>
             </div>
+            <span class="mt-0.5 shrink-0 text-lg text-gray-400 dark:text-gray-500">
+              {{ isSectionExpanded('responseHeaders') ? '▾' : '▸' }}
+            </span>
+          </button>
 
+          <div v-if="isSectionExpanded('responseHeaders')" class="mt-4 space-y-3">
             <div v-if="responseHeadersCanShowJSON" class="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -216,9 +301,7 @@
                 {{ t('admin.usage.detail.rawView') }}
               </button>
             </div>
-          </div>
 
-          <div class="mt-4">
             <JsonTreeViewer
               v-if="responseHeadersViewMode === 'json' && responseHeadersCanShowJSON && responseHeadersJSON != null"
               :value="responseHeadersJSON"
@@ -236,8 +319,13 @@
         </div>
 
         <div v-if="responsePayload" class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-900">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div class="space-y-2">
+          <button
+            type="button"
+            class="flex w-full items-start justify-between gap-3 text-left"
+            :aria-expanded="isSectionExpanded('responseBody')"
+            @click="toggleSection('responseBody')"
+          >
+            <div class="min-w-0 space-y-2">
               <div class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ t('admin.usage.detail.responseBody') }}</div>
               <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600 dark:text-gray-300">
                 <span>{{ t('admin.usage.detail.contentType') }}: {{ responsePayload.content_type || '-' }}</span>
@@ -248,7 +336,12 @@
                 </span>
               </div>
             </div>
+            <span class="mt-0.5 shrink-0 text-lg text-gray-400 dark:text-gray-500">
+              {{ isSectionExpanded('responseBody') ? '▾' : '▸' }}
+            </span>
+          </button>
 
+          <div v-if="isSectionExpanded('responseBody')" class="mt-4 space-y-3">
             <div class="flex flex-wrap items-center gap-2">
               <div v-if="responsePayload.kind === 'frames'" class="flex items-center gap-2">
                 <label class="text-sm text-gray-600 dark:text-gray-300" for="response-frame-select">
@@ -284,9 +377,7 @@
                 </button>
               </template>
             </div>
-          </div>
 
-          <div class="mt-4">
             <JsonTreeViewer
               v-if="responseViewMode === 'json' && responsePayloadCanShowJSON && responsePayloadJSON != null"
               :value="responsePayloadJSON"
@@ -330,10 +421,34 @@ const { t } = useI18n()
 const activeSection = ref<'request' | 'response'>('request')
 const requestHeadersViewMode = ref<ViewMode>('json')
 const requestViewMode = ref<ViewMode>('json')
+const finalRequestViewMode = ref<ViewMode>('json')
 const responseHeadersViewMode = ref<ViewMode>('json')
 const responseViewMode = ref<ViewMode>('json')
 const selectedRequestFrameIndex = ref(0)
 const selectedResponseFrameIndex = ref(0)
+
+const sectionKeys = ['requestHeaders', 'requestBody', 'finalRequestBody', 'responseHeaders', 'responseBody'] as const
+
+type SectionKey = typeof sectionKeys[number]
+
+type SectionState = Record<SectionKey, boolean>
+
+const createCollapsedSections = (): SectionState => ({
+  requestHeaders: false,
+  requestBody: false,
+  finalRequestBody: false,
+  responseHeaders: false,
+  responseBody: false
+})
+
+const expandedSections = ref<SectionState>(createCollapsedSections())
+
+const isSectionExpanded = (section: SectionKey) => expandedSections.value[section]
+
+const toggleSection = (section: SectionKey) => {
+  expandedSections.value[section] = !expandedSections.value[section]
+}
+
 
 const requestTypeLabel = computed(() => {
   const requestType = props.detail?.request_type || props.usage?.request_type
@@ -345,6 +460,7 @@ const requestTypeLabel = computed(() => {
 
 const requestHeadersPayload = computed<UsageDetailPayload | null>(() => props.detail?.request_headers || null)
 const requestPayload = computed<UsageDetailPayload | null>(() => props.detail?.request || null)
+const finalRequestPayload = computed<UsageDetailPayload | null>(() => props.detail?.final_request || null)
 const responseHeadersPayload = computed<UsageDetailPayload | null>(() => props.detail?.response_headers || null)
 const responsePayload = computed<UsageDetailPayload | null>(() => props.detail?.response || null)
 
@@ -391,6 +507,10 @@ const requestPayloadRaw = computed(() => getPayloadRaw(requestPayload.value, sel
 const requestPayloadCanShowJSON = computed(() => canShowJSONView(requestPayload.value, selectedRequestFrameIndex.value))
 const requestPayloadJSON = computed(() => getPayloadJSON(requestPayload.value, selectedRequestFrameIndex.value))
 
+const finalRequestPayloadRaw = computed(() => getPayloadRaw(finalRequestPayload.value))
+const finalRequestPayloadCanShowJSON = computed(() => canShowJSONView(finalRequestPayload.value))
+const finalRequestPayloadJSON = computed(() => getPayloadJSON(finalRequestPayload.value))
+
 const responseHeadersRaw = computed(() => getPayloadRaw(responseHeadersPayload.value))
 const responseHeadersCanShowJSON = computed(() => canShowJSONView(responseHeadersPayload.value))
 const responseHeadersJSON = computed(() => getPayloadJSON(responseHeadersPayload.value))
@@ -400,10 +520,12 @@ const responsePayloadCanShowJSON = computed(() => canShowJSONView(responsePayloa
 const responsePayloadJSON = computed(() => getPayloadJSON(responsePayload.value, selectedResponseFrameIndex.value))
 
 watch([() => props.show, () => props.detail, activeSection], () => {
+  expandedSections.value = createCollapsedSections()
   selectedRequestFrameIndex.value = 0
   selectedResponseFrameIndex.value = 0
   requestHeadersViewMode.value = requestHeadersCanShowJSON.value ? 'json' : 'raw'
   requestViewMode.value = requestPayloadCanShowJSON.value ? 'json' : 'raw'
+  finalRequestViewMode.value = finalRequestPayloadCanShowJSON.value ? 'json' : 'raw'
   responseHeadersViewMode.value = responseHeadersCanShowJSON.value ? 'json' : 'raw'
   responseViewMode.value = responsePayloadCanShowJSON.value ? 'json' : 'raw'
 }, { immediate: true })

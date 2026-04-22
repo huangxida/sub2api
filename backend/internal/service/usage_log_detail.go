@@ -25,6 +25,12 @@ type UsageLogDetail struct {
 	RequestIsJSON      bool
 	RequestComplete    bool
 
+	FinalRequestBody        *string
+	FinalRequestContentType *string
+	FinalRequestBytes       int64
+	FinalRequestIsJSON      bool
+	FinalRequestComplete    bool
+
 	ResponseHeaders     *string
 	ResponseBody        *string
 	ResponseFrames      []string
@@ -46,6 +52,12 @@ type UsageLogDetailSaveInput struct {
 	RequestBytes       int64
 	RequestContentType string
 	RequestComplete    bool
+
+	FinalRequestBody        []byte
+	FinalRequestBytes       int64
+	FinalRequestContentType string
+	FinalRequestComplete    bool
+	FinalRequestTransformed bool
 
 	ResponseHeaders     http.Header
 	ResponseBody        []byte
@@ -82,22 +94,27 @@ func (s *UsageLogDetailService) Save(ctx context.Context, input UsageLogDetailSa
 	}
 
 	detail := &UsageLogDetail{
-		UsageLogID:          input.UsageLogID,
-		RequestID:           requestID,
-		APIKeyID:            input.APIKeyID,
-		RequestHeaders:      httpHeadersToOptionalJSONText(input.RequestHeaders),
-		RequestBody:         rawBytesToOptionalString(input.RequestBody),
-		RequestBytes:        normalizeObservedBytes(input.RequestBytes, input.RequestBody, nil),
-		RequestIsJSON:       input.RequestComplete && len(input.RequestBody) > 0 && json.Valid(input.RequestBody),
-		RequestComplete:     input.RequestComplete,
-		ResponseHeaders:     httpHeadersToOptionalJSONText(input.ResponseHeaders),
-		ResponseBody:        rawBytesToOptionalString(input.ResponseBody),
-		ResponseFrames:      rawFramesToStrings(input.ResponseFrames),
-		ResponseBytes:       normalizeObservedBytes(input.ResponseBytes, input.ResponseBody, input.ResponseFrames),
-		ResponseIsJSON:      input.ResponseComplete && len(input.ResponseFrames) == 0 && len(input.ResponseBody) > 0 && json.Valid(input.ResponseBody),
-		ResponseComplete:    input.ResponseComplete,
-		RequestContentType:  normalizeOptionalString(input.RequestContentType),
-		ResponseContentType: normalizeOptionalString(input.ResponseContentType),
+		UsageLogID:              input.UsageLogID,
+		RequestID:               requestID,
+		APIKeyID:                input.APIKeyID,
+		RequestHeaders:          httpHeadersToOptionalJSONText(input.RequestHeaders),
+		RequestBody:             rawBytesToOptionalString(input.RequestBody),
+		RequestBytes:            normalizeObservedBytes(input.RequestBytes, input.RequestBody, nil),
+		RequestIsJSON:           input.RequestComplete && len(input.RequestBody) > 0 && json.Valid(input.RequestBody),
+		RequestComplete:         input.RequestComplete,
+		FinalRequestBody:        rawBytesToOptionalString(input.FinalRequestBody),
+		FinalRequestBytes:       normalizeObservedBytes(input.FinalRequestBytes, input.FinalRequestBody, nil),
+		FinalRequestIsJSON:      input.FinalRequestComplete && len(input.FinalRequestBody) > 0 && json.Valid(input.FinalRequestBody),
+		FinalRequestComplete:    input.FinalRequestComplete,
+		ResponseHeaders:         httpHeadersToOptionalJSONText(input.ResponseHeaders),
+		ResponseBody:            rawBytesToOptionalString(input.ResponseBody),
+		ResponseFrames:          rawFramesToStrings(input.ResponseFrames),
+		ResponseBytes:           normalizeObservedBytes(input.ResponseBytes, input.ResponseBody, input.ResponseFrames),
+		ResponseIsJSON:          input.ResponseComplete && len(input.ResponseFrames) == 0 && len(input.ResponseBody) > 0 && json.Valid(input.ResponseBody),
+		ResponseComplete:        input.ResponseComplete,
+		RequestContentType:      normalizeOptionalString(input.RequestContentType),
+		FinalRequestContentType: normalizeOptionalString(input.FinalRequestContentType),
+		ResponseContentType:     normalizeOptionalString(input.ResponseContentType),
 	}
 
 	return s.repo.Upsert(ctx, detail)

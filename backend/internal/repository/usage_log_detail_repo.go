@@ -56,6 +56,11 @@ func (r *usageLogDetailRepository) Upsert(ctx context.Context, detail *service.U
 			request_bytes,
 			request_is_json,
 			request_complete,
+			final_request_body,
+			final_request_content_type,
+			final_request_bytes,
+			final_request_is_json,
+			final_request_complete,
 			response_headers,
 			response_body,
 			response_frames,
@@ -65,7 +70,8 @@ func (r *usageLogDetailRepository) Upsert(ctx context.Context, detail *service.U
 			response_complete
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7, $8,
-			$9, $10, $11, $12, $13, $14, $15, $16
+			$9, $10, $11, $12, $13, $14, $15, $16,
+			$17, $18, $19, $20, $21
 		)
 		ON CONFLICT (request_id, api_key_id) DO UPDATE SET
 			usage_log_id = COALESCE(EXCLUDED.usage_log_id, usage_log_details.usage_log_id),
@@ -75,6 +81,11 @@ func (r *usageLogDetailRepository) Upsert(ctx context.Context, detail *service.U
 			request_bytes = EXCLUDED.request_bytes,
 			request_is_json = EXCLUDED.request_is_json,
 			request_complete = EXCLUDED.request_complete,
+			final_request_body = EXCLUDED.final_request_body,
+			final_request_content_type = EXCLUDED.final_request_content_type,
+			final_request_bytes = EXCLUDED.final_request_bytes,
+			final_request_is_json = EXCLUDED.final_request_is_json,
+			final_request_complete = EXCLUDED.final_request_complete,
 			response_headers = EXCLUDED.response_headers,
 			response_body = EXCLUDED.response_body,
 			response_frames = EXCLUDED.response_frames,
@@ -92,6 +103,11 @@ func (r *usageLogDetailRepository) Upsert(ctx context.Context, detail *service.U
 		detail.RequestBytes,
 		detail.RequestIsJSON,
 		detail.RequestComplete,
+		nullOptionalText(detail.FinalRequestBody),
+		nullOptionalText(detail.FinalRequestContentType),
+		detail.FinalRequestBytes,
+		detail.FinalRequestIsJSON,
+		detail.FinalRequestComplete,
 		nullOptionalText(detail.ResponseHeaders),
 		nullOptionalText(detail.ResponseBody),
 		responseFrames,
@@ -124,6 +140,11 @@ func (r *usageLogDetailRepository) GetByRequestKey(ctx context.Context, key serv
 			request_bytes,
 			request_is_json,
 			request_complete,
+			final_request_body,
+			final_request_content_type,
+			final_request_bytes,
+			final_request_is_json,
+			final_request_complete,
 			response_headers,
 			response_body,
 			response_frames,
@@ -152,6 +173,11 @@ func (r *usageLogDetailRepository) GetByUsageLogID(ctx context.Context, usageLog
 			request_bytes,
 			request_is_json,
 			request_complete,
+			final_request_body,
+			final_request_content_type,
+			final_request_bytes,
+			final_request_is_json,
+			final_request_complete,
 			response_headers,
 			response_body,
 			response_frames,
@@ -283,14 +309,16 @@ func (r *usageLogDetailRepository) getDetail(ctx context.Context, query string, 
 	}
 
 	var (
-		detail               service.UsageLogDetail
-		requestHeadersBytes  []byte
-		requestBody          sql.NullString
-		requestContentType   sql.NullString
-		responseHeadersBytes []byte
-		responseBody         sql.NullString
-		responseFramesBytes  []byte
-		responseContentType  sql.NullString
+		detail                  service.UsageLogDetail
+		requestHeadersBytes     []byte
+		requestBody             sql.NullString
+		requestContentType      sql.NullString
+		finalRequestBody        sql.NullString
+		finalRequestContentType sql.NullString
+		responseHeadersBytes    []byte
+		responseBody            sql.NullString
+		responseFramesBytes     []byte
+		responseContentType     sql.NullString
 	)
 	if err := rows.Scan(
 		&detail.UsageLogID,
@@ -302,6 +330,11 @@ func (r *usageLogDetailRepository) getDetail(ctx context.Context, query string, 
 		&detail.RequestBytes,
 		&detail.RequestIsJSON,
 		&detail.RequestComplete,
+		&finalRequestBody,
+		&finalRequestContentType,
+		&detail.FinalRequestBytes,
+		&detail.FinalRequestIsJSON,
+		&detail.FinalRequestComplete,
 		&responseHeadersBytes,
 		&responseBody,
 		&responseFramesBytes,
@@ -320,6 +353,8 @@ func (r *usageLogDetailRepository) getDetail(ctx context.Context, query string, 
 	detail.RequestHeaders = jsonTextPtrFromBytes(requestHeadersBytes)
 	detail.RequestBody = stringPtrFromNullString(requestBody)
 	detail.RequestContentType = stringPtrFromNullString(requestContentType)
+	detail.FinalRequestBody = stringPtrFromNullString(finalRequestBody)
+	detail.FinalRequestContentType = stringPtrFromNullString(finalRequestContentType)
 	detail.ResponseHeaders = jsonTextPtrFromBytes(responseHeadersBytes)
 	detail.ResponseBody = stringPtrFromNullString(responseBody)
 	detail.ResponseContentType = stringPtrFromNullString(responseContentType)
