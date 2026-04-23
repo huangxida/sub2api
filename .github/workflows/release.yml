@@ -1,25 +1,27 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows:
-      - Build & Deploy sub2api to los3
-    types:
-      - completed
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag name to release, for example v1.10.0
+        required: true
+        type: string
+      target_sha:
+        description: Commit SHA the tag points to
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   release:
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
     name: Create source release
     runs-on: ubuntu-latest
     env:
-      TAG_NAME: ${{ github.event.workflow_run.head_branch }}
-      TARGET_SHA: ${{ github.event.workflow_run.head_sha }}
+      TAG_NAME: ${{ inputs.tag }}
+      TARGET_SHA: ${{ inputs.target_sha }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6

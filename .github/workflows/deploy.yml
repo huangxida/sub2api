@@ -10,6 +10,9 @@ concurrency:
   group: deploy-sub2api
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 env:
   HOST: los3
   IMAGE: xidahuang/sub2api
@@ -105,3 +108,41 @@ jobs:
             | sort -k2 -r \
             | awk 'NR>3 {print $1}' \
             | xargs -r -I{} docker rmi "$IMAGE:{}" 2>/dev/null || true
+
+      - name: Fetch tags for release notes
+        if: success() && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: git fetch --force --tags origin
+
+      - name: Generate release notes
+        if: success() && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          TARGET_SHA="${GITHUB_SHA}"
+          prev_tag="$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || true)"
+          {
+            echo "## Release ${TAG_NAME}"
+            echo
+            echo "Automated source release for tag \`${TAG_NAME}\`."
+            echo
+            if [ -n "$prev_tag" ]; then
+              echo "Changes since \`${prev_tag}\`:"
+              echo
+              git log "${prev_tag}..${TARGET_SHA}" --pretty=format:"- %s (%h)"
+            else
+              echo "Initial tagged release in this repository."
+            fi
+          } > release_notes.md
+
+      - name: Create GitHub Release
+        if: success() && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: true
