@@ -43,7 +43,7 @@ jobs:
             -t "$IMAGE:${IMAGE_VERSION}" \
             .
 
-          docker images "$IMAGE" | head -5
+          docker images "$IMAGE" | awk 'NR <= 5'
 
       - name: Save image to tarball
         shell: bash
