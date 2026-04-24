@@ -449,6 +449,7 @@ export interface OpenAIMessagesDispatchModelConfig {
   sonnet_mapped_model?: string
   haiku_mapped_model?: string
   exact_model_mappings?: Record<string, string>
+  forced_reasoning_effort?: string
 }
 
 export interface Group {

@@ -15,9 +15,10 @@ func normalizeOpenAIMessagesDispatchMappedModel(model string) string {
 
 func normalizeOpenAIMessagesDispatchModelConfig(cfg OpenAIMessagesDispatchModelConfig) OpenAIMessagesDispatchModelConfig {
 	out := OpenAIMessagesDispatchModelConfig{
-		OpusMappedModel:   normalizeOpenAIMessagesDispatchMappedModel(cfg.OpusMappedModel),
-		SonnetMappedModel: normalizeOpenAIMessagesDispatchMappedModel(cfg.SonnetMappedModel),
-		HaikuMappedModel:  normalizeOpenAIMessagesDispatchMappedModel(cfg.HaikuMappedModel),
+		OpusMappedModel:       normalizeOpenAIMessagesDispatchMappedModel(cfg.OpusMappedModel),
+		SonnetMappedModel:     normalizeOpenAIMessagesDispatchMappedModel(cfg.SonnetMappedModel),
+		HaikuMappedModel:      normalizeOpenAIMessagesDispatchMappedModel(cfg.HaikuMappedModel),
+		ForcedReasoningEffort: normalizeOpenAIReasoningEffort(cfg.ForcedReasoningEffort),
 	}
 
 	if len(cfg.ExactModelMappings) > 0 {
@@ -88,6 +89,13 @@ func (g *Group) ResolveMessagesDispatchModel(requestedModel string) string {
 	default:
 		return ""
 	}
+}
+
+func (g *Group) ResolveMessagesDispatchForcedReasoningEffort() string {
+	if g == nil {
+		return ""
+	}
+	return normalizeOpenAIReasoningEffort(g.MessagesDispatchModelConfig.ForcedReasoningEffort)
 }
 
 func sanitizeGroupMessagesDispatchFields(g *Group) {

@@ -20,9 +20,10 @@ func TestGroupEntityToService_PreservesMessagesDispatchModelConfig(t *testing.T)
 		AllowMessagesDispatch: true,
 		DefaultMappedModel:    "gpt-5.4",
 		MessagesDispatchModelConfig: service.OpenAIMessagesDispatchModelConfig{
-			OpusMappedModel:   "gpt-5.4-nano",
-			SonnetMappedModel: "gpt-5.3-codex",
-			HaikuMappedModel:  "gpt-5.4-mini",
+			OpusMappedModel:       "gpt-5.4-nano",
+			SonnetMappedModel:     "gpt-5.3-codex",
+			HaikuMappedModel:      "gpt-5.4-mini",
+			ForcedReasoningEffort: "high",
 			ExactModelMappings: map[string]string{
 				"claude-sonnet-4.5": "gpt-5.4-nano",
 			},
@@ -48,9 +49,10 @@ func TestAPIKeyRepository_GetByKeyForAuth_PreservesMessagesDispatchModelConfig_S
 		SetAllowMessagesDispatch(true).
 		SetDefaultMappedModel("gpt-5.4").
 		SetMessagesDispatchModelConfig(service.OpenAIMessagesDispatchModelConfig{
-			OpusMappedModel:   "gpt-5.4-nano",
-			SonnetMappedModel: "gpt-5.3-codex",
-			HaikuMappedModel:  "gpt-5.4-mini",
+			OpusMappedModel:       "gpt-5.4-nano",
+			SonnetMappedModel:     "gpt-5.3-codex",
+			HaikuMappedModel:      "gpt-5.4-mini",
+			ForcedReasoningEffort: "high",
 			ExactModelMappings: map[string]string{
 				"claude-sonnet-4.5": "gpt-5.4-nano",
 			},
