@@ -1039,23 +1039,10 @@
                 <label class="input-label">{{
                   t("admin.groups.openaiMessages.forcedReasoningLabel")
                 }}</label>
-                <select v-model="createForm.forced_reasoning_effort" class="input">
-                  <option value="">
-                    {{ t("admin.groups.openaiMessages.forcedReasoningInherit") }}
-                  </option>
-                  <option value="low">
-                    {{ t("admin.groups.openaiMessages.reasoningLow") }}
-                  </option>
-                  <option value="medium">
-                    {{ t("admin.groups.openaiMessages.reasoningMedium") }}
-                  </option>
-                  <option value="high">
-                    {{ t("admin.groups.openaiMessages.reasoningHigh") }}
-                  </option>
-                  <option value="xhigh">
-                    {{ t("admin.groups.openaiMessages.reasoningXHigh") }}
-                  </option>
-                </select>
+                <Select
+                  v-model="createForm.forced_reasoning_effort"
+                  :options="reasoningEffortOptions"
+                />
               </div>
             </div>
 
@@ -2213,23 +2200,10 @@
                 <label class="input-label">{{
                   t("admin.groups.openaiMessages.forcedReasoningLabel")
                 }}</label>
-                <select v-model="editForm.forced_reasoning_effort" class="input">
-                  <option value="">
-                    {{ t("admin.groups.openaiMessages.forcedReasoningInherit") }}
-                  </option>
-                  <option value="low">
-                    {{ t("admin.groups.openaiMessages.reasoningLow") }}
-                  </option>
-                  <option value="medium">
-                    {{ t("admin.groups.openaiMessages.reasoningMedium") }}
-                  </option>
-                  <option value="high">
-                    {{ t("admin.groups.openaiMessages.reasoningHigh") }}
-                  </option>
-                  <option value="xhigh">
-                    {{ t("admin.groups.openaiMessages.reasoningXHigh") }}
-                  </option>
-                </select>
+                <Select
+                  v-model="editForm.forced_reasoning_effort"
+                  :options="reasoningEffortOptions"
+                />
               </div>
             </div>
 
@@ -2929,6 +2903,17 @@ const editStatusOptions = computed(() => [
 const subscriptionTypeOptions = computed(() => [
   { value: "standard", label: t("admin.groups.subscription.standard") },
   { value: "subscription", label: t("admin.groups.subscription.subscription") },
+]);
+
+const reasoningEffortOptions = computed(() => [
+  {
+    value: "",
+    label: t("admin.groups.openaiMessages.forcedReasoningInherit"),
+  },
+  { value: "low", label: t("admin.groups.openaiMessages.reasoningLow") },
+  { value: "medium", label: t("admin.groups.openaiMessages.reasoningMedium") },
+  { value: "high", label: t("admin.groups.openaiMessages.reasoningHigh") },
+  { value: "xhigh", label: t("admin.groups.openaiMessages.reasoningXHigh") },
 ]);
 
 // 降级分组选项（创建时）- 仅包含 anthropic 平台且未启用 claude_code_only 的分组
