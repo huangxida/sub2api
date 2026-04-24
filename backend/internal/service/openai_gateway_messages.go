@@ -31,6 +31,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	body []byte,
 	promptCacheKey string,
 	defaultMappedModel string,
+	forcedReasoningEffort string,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 
@@ -48,6 +49,14 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
+	}
+
+	forcedReasoningEffort = normalizeOpenAIReasoningEffort(forcedReasoningEffort)
+	if forcedReasoningEffort != "" {
+		if responsesReq.Reasoning == nil {
+			responsesReq.Reasoning = &apicompat.ResponsesReasoning{Summary: "auto"}
+		}
+		responsesReq.Reasoning.Effort = forcedReasoningEffort
 	}
 
 	// Upstream always uses streaming (upstream may not support sync mode).

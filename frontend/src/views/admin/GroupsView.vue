@@ -1017,6 +1017,49 @@
             </div>
 
             <div
+              class="mt-5 relative overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm dark:border-amber-900/50 dark:bg-dark-800"
+            >
+              <div
+                class="border-b border-amber-100 bg-amber-50/80 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-900/20"
+              >
+                <div class="flex items-center gap-2">
+                  <div class="h-2 w-2 rounded-full bg-amber-500"></div>
+                  <label
+                    class="text-sm font-medium text-amber-900 dark:text-amber-100"
+                    >{{
+                      t("admin.groups.openaiMessages.forcedReasoningTitle")
+                    }}</label
+                  >
+                </div>
+                <p class="mt-1 text-xs text-amber-700/90 dark:text-amber-300/90">
+                  {{ t("admin.groups.openaiMessages.forcedReasoningHint") }}
+                </p>
+              </div>
+              <div class="p-4">
+                <label class="input-label">{{
+                  t("admin.groups.openaiMessages.forcedReasoningLabel")
+                }}</label>
+                <select v-model="createForm.forced_reasoning_effort" class="input">
+                  <option value="">
+                    {{ t("admin.groups.openaiMessages.forcedReasoningInherit") }}
+                  </option>
+                  <option value="low">
+                    {{ t("admin.groups.openaiMessages.reasoningLow") }}
+                  </option>
+                  <option value="medium">
+                    {{ t("admin.groups.openaiMessages.reasoningMedium") }}
+                  </option>
+                  <option value="high">
+                    {{ t("admin.groups.openaiMessages.reasoningHigh") }}
+                  </option>
+                  <option value="xhigh">
+                    {{ t("admin.groups.openaiMessages.reasoningXHigh") }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div
               class="mt-5 relative overflow-hidden rounded-xl border border-primary-200 bg-white shadow-sm dark:border-primary-900/50 dark:bg-dark-800"
             >
               <div
@@ -2148,6 +2191,49 @@
             </div>
 
             <div
+              class="mt-5 relative overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm dark:border-amber-900/50 dark:bg-dark-800"
+            >
+              <div
+                class="border-b border-amber-100 bg-amber-50/80 px-4 py-3 dark:border-amber-900/40 dark:bg-amber-900/20"
+              >
+                <div class="flex items-center gap-2">
+                  <div class="h-2 w-2 rounded-full bg-amber-500"></div>
+                  <label
+                    class="text-sm font-medium text-amber-900 dark:text-amber-100"
+                    >{{
+                      t("admin.groups.openaiMessages.forcedReasoningTitle")
+                    }}</label
+                  >
+                </div>
+                <p class="mt-1 text-xs text-amber-700/90 dark:text-amber-300/90">
+                  {{ t("admin.groups.openaiMessages.forcedReasoningHint") }}
+                </p>
+              </div>
+              <div class="p-4">
+                <label class="input-label">{{
+                  t("admin.groups.openaiMessages.forcedReasoningLabel")
+                }}</label>
+                <select v-model="editForm.forced_reasoning_effort" class="input">
+                  <option value="">
+                    {{ t("admin.groups.openaiMessages.forcedReasoningInherit") }}
+                  </option>
+                  <option value="low">
+                    {{ t("admin.groups.openaiMessages.reasoningLow") }}
+                  </option>
+                  <option value="medium">
+                    {{ t("admin.groups.openaiMessages.reasoningMedium") }}
+                  </option>
+                  <option value="high">
+                    {{ t("admin.groups.openaiMessages.reasoningHigh") }}
+                  </option>
+                  <option value="xhigh">
+                    {{ t("admin.groups.openaiMessages.reasoningXHigh") }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <div
               class="mt-5 relative overflow-hidden rounded-xl border border-primary-200 bg-white shadow-sm dark:border-primary-900/50 dark:bg-dark-800"
             >
               <div
@@ -3022,6 +3108,7 @@ const createForm = reactive({
   opus_mapped_model: createMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: createMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: createMessagesDispatchDefaults.haiku_mapped_model,
+  forced_reasoning_effort: createMessagesDispatchDefaults.forced_reasoning_effort,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
   // 账号过滤控制（OpenAI/Antigravity 平台）
   require_oauth_only: false,
@@ -3305,6 +3392,7 @@ const editForm = reactive({
   opus_mapped_model: editMessagesDispatchDefaults.opus_mapped_model,
   sonnet_mapped_model: editMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: editMessagesDispatchDefaults.haiku_mapped_model,
+  forced_reasoning_effort: editMessagesDispatchDefaults.forced_reasoning_effort,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
   // 账号过滤控制（OpenAI/Antigravity 平台）
   require_oauth_only: false,
@@ -3542,6 +3630,7 @@ const handleCreateGroup = async () => {
               opus_mapped_model: createForm.opus_mapped_model,
               sonnet_mapped_model: createForm.sonnet_mapped_model,
               haiku_mapped_model: createForm.haiku_mapped_model,
+              forced_reasoning_effort: createForm.forced_reasoning_effort,
               exact_model_mappings: createForm.exact_model_mappings,
             })
           : undefined,
@@ -3598,6 +3687,8 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.opus_mapped_model = messagesDispatchFormState.opus_mapped_model;
   editForm.sonnet_mapped_model = messagesDispatchFormState.sonnet_mapped_model;
   editForm.haiku_mapped_model = messagesDispatchFormState.haiku_mapped_model;
+  editForm.forced_reasoning_effort =
+    messagesDispatchFormState.forced_reasoning_effort;
   editForm.exact_model_mappings =
     messagesDispatchFormState.exact_model_mappings;
   editForm.require_oauth_only = group.require_oauth_only ?? false;
@@ -3667,6 +3758,7 @@ const handleUpdateGroup = async () => {
               opus_mapped_model: editForm.opus_mapped_model,
               sonnet_mapped_model: editForm.sonnet_mapped_model,
               haiku_mapped_model: editForm.haiku_mapped_model,
+              forced_reasoning_effort: editForm.forced_reasoning_effort,
               exact_model_mappings: editForm.exact_model_mappings,
             })
           : undefined,
