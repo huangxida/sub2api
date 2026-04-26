@@ -301,9 +301,10 @@ func TestAdminService_CreateGroup_NormalizesMessagesDispatchModelConfig(t *testi
 		Platform:       PlatformOpenAI,
 		RateMultiplier: 1.0,
 		MessagesDispatchModelConfig: OpenAIMessagesDispatchModelConfig{
-			OpusMappedModel:   " gpt-5.4-high ",
-			SonnetMappedModel: " gpt-5.3-codex ",
-			HaikuMappedModel:  " gpt-5.4-mini-medium ",
+			OpusMappedModel:       " gpt-5.4-high ",
+			SonnetMappedModel:     " gpt-5.3-codex ",
+			HaikuMappedModel:      " gpt-5.4-mini-medium ",
+			ForcedReasoningEffort: " extra_high ",
 			ExactModelMappings: map[string]string{
 				" claude-sonnet-4-5-20250929 ": " gpt-5.2-high ",
 			},
@@ -313,9 +314,10 @@ func TestAdminService_CreateGroup_NormalizesMessagesDispatchModelConfig(t *testi
 	require.NotNil(t, group)
 	require.NotNil(t, repo.created)
 	require.Equal(t, OpenAIMessagesDispatchModelConfig{
-		OpusMappedModel:   "gpt-5.4",
-		SonnetMappedModel: "gpt-5.3-codex",
-		HaikuMappedModel:  "gpt-5.4-mini",
+		OpusMappedModel:       "gpt-5.4",
+		SonnetMappedModel:     "gpt-5.3-codex",
+		HaikuMappedModel:      "gpt-5.4-mini",
+		ForcedReasoningEffort: "xhigh",
 		ExactModelMappings: map[string]string{
 			"claude-sonnet-4-5-20250929": "gpt-5.2",
 		},

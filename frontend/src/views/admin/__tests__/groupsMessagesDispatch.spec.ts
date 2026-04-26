@@ -14,6 +14,7 @@ describe("groupsMessagesDispatch", () => {
       opus_mapped_model: "gpt-5.4",
       sonnet_mapped_model: "gpt-5.3-codex",
       haiku_mapped_model: "gpt-5.4-mini",
+      forced_reasoning_effort: "",
       exact_model_mappings: [],
     });
   });
@@ -24,6 +25,7 @@ describe("groupsMessagesDispatch", () => {
       opus_mapped_model: " gpt-5.4 ",
       sonnet_mapped_model: "gpt-5.3-codex",
       haiku_mapped_model: " gpt-5.4-mini ",
+      forced_reasoning_effort: " high ",
       exact_model_mappings: [
         {
           claude_model: " claude-sonnet-4-5-20250929 ",
@@ -38,6 +40,7 @@ describe("groupsMessagesDispatch", () => {
       opus_mapped_model: "gpt-5.4",
       sonnet_mapped_model: "gpt-5.3-codex",
       haiku_mapped_model: "gpt-5.4-mini",
+      forced_reasoning_effort: "high",
       exact_model_mappings: {
         "claude-sonnet-4-5-20250929": "gpt-5.2",
       },
@@ -50,6 +53,7 @@ describe("groupsMessagesDispatch", () => {
         opus_mapped_model: "gpt-5.4",
         sonnet_mapped_model: "gpt-5.2",
         haiku_mapped_model: "gpt-5.4-mini",
+        forced_reasoning_effort: " xhigh ",
         exact_model_mappings: {
           "claude-opus-4-6": "gpt-5.4",
           "claude-haiku-4-5-20251001": "gpt-5.4-mini",
@@ -60,6 +64,7 @@ describe("groupsMessagesDispatch", () => {
       opus_mapped_model: "gpt-5.4",
       sonnet_mapped_model: "gpt-5.2",
       haiku_mapped_model: "gpt-5.4-mini",
+      forced_reasoning_effort: "xhigh",
       exact_model_mappings: [
         {
           claude_model: "claude-haiku-4-5-20251001",
@@ -76,6 +81,7 @@ describe("groupsMessagesDispatch", () => {
       opus_mapped_model: "gpt-5.2",
       sonnet_mapped_model: "gpt-5.4",
       haiku_mapped_model: "gpt-5.1",
+      forced_reasoning_effort: "low",
       exact_model_mappings: [
         { claude_model: "claude-opus-4-6", target_model: "gpt-5.4" },
       ],
@@ -88,6 +94,7 @@ describe("groupsMessagesDispatch", () => {
       opus_mapped_model: "gpt-5.4",
       sonnet_mapped_model: "gpt-5.3-codex",
       haiku_mapped_model: "gpt-5.4-mini",
+      forced_reasoning_effort: "",
       exact_model_mappings: [],
     });
   });
