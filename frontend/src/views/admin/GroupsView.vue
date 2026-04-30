@@ -1047,6 +1047,53 @@
             </div>
 
             <div
+              class="mt-5 relative overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-sm dark:border-emerald-900/50 dark:bg-dark-800"
+            >
+              <div
+                class="border-b border-emerald-100 bg-emerald-50/80 px-4 py-3 dark:border-emerald-900/40 dark:bg-emerald-900/20"
+              >
+                <div class="flex items-center gap-2">
+                  <div class="h-2 w-2 rounded-full bg-emerald-500"></div>
+                  <label
+                    class="text-sm font-medium text-emerald-900 dark:text-emerald-100"
+                    >{{
+                      t("admin.groups.openaiMessages.forcedFastTitle")
+                    }}</label
+                  >
+                </div>
+                <p
+                  class="mt-1 text-xs text-emerald-700/90 dark:text-emerald-300/90"
+                >
+                  {{ t("admin.groups.openaiMessages.forcedFastHint") }}
+                </p>
+              </div>
+              <div class="flex items-center justify-between gap-4 p-4">
+                <label class="input-label mb-0">{{
+                  t("admin.groups.openaiMessages.forcedFastLabel")
+                }}</label>
+                <button
+                  type="button"
+                  @click="createForm.forced_fast_mode = !createForm.forced_fast_mode"
+                  class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                  :class="
+                    createForm.forced_fast_mode
+                      ? 'bg-emerald-500'
+                      : 'bg-gray-300 dark:bg-dark-600'
+                  "
+                >
+                  <span
+                    class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                    :class="
+                      createForm.forced_fast_mode
+                        ? 'translate-x-6'
+                        : 'translate-x-1'
+                    "
+                  />
+                </button>
+              </div>
+            </div>
+
+            <div
               class="mt-5 relative overflow-hidden rounded-xl border border-primary-200 bg-white shadow-sm dark:border-primary-900/50 dark:bg-dark-800"
             >
               <div
@@ -2208,6 +2255,53 @@
             </div>
 
             <div
+              class="mt-5 relative overflow-hidden rounded-xl border border-emerald-200 bg-white shadow-sm dark:border-emerald-900/50 dark:bg-dark-800"
+            >
+              <div
+                class="border-b border-emerald-100 bg-emerald-50/80 px-4 py-3 dark:border-emerald-900/40 dark:bg-emerald-900/20"
+              >
+                <div class="flex items-center gap-2">
+                  <div class="h-2 w-2 rounded-full bg-emerald-500"></div>
+                  <label
+                    class="text-sm font-medium text-emerald-900 dark:text-emerald-100"
+                    >{{
+                      t("admin.groups.openaiMessages.forcedFastTitle")
+                    }}</label
+                  >
+                </div>
+                <p
+                  class="mt-1 text-xs text-emerald-700/90 dark:text-emerald-300/90"
+                >
+                  {{ t("admin.groups.openaiMessages.forcedFastHint") }}
+                </p>
+              </div>
+              <div class="flex items-center justify-between gap-4 p-4">
+                <label class="input-label mb-0">{{
+                  t("admin.groups.openaiMessages.forcedFastLabel")
+                }}</label>
+                <button
+                  type="button"
+                  @click="editForm.forced_fast_mode = !editForm.forced_fast_mode"
+                  class="relative inline-flex h-6 w-12 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                  :class="
+                    editForm.forced_fast_mode
+                      ? 'bg-emerald-500'
+                      : 'bg-gray-300 dark:bg-dark-600'
+                  "
+                >
+                  <span
+                    class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                    :class="
+                      editForm.forced_fast_mode
+                        ? 'translate-x-6'
+                        : 'translate-x-1'
+                    "
+                  />
+                </button>
+              </div>
+            </div>
+
+            <div
               class="mt-5 relative overflow-hidden rounded-xl border border-primary-200 bg-white shadow-sm dark:border-primary-900/50 dark:bg-dark-800"
             >
               <div
@@ -3094,6 +3188,7 @@ const createForm = reactive({
   sonnet_mapped_model: createMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: createMessagesDispatchDefaults.haiku_mapped_model,
   forced_reasoning_effort: createMessagesDispatchDefaults.forced_reasoning_effort,
+  forced_fast_mode: createMessagesDispatchDefaults.forced_fast_mode,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
   // 账号过滤控制（OpenAI/Antigravity 平台）
   require_oauth_only: false,
@@ -3378,6 +3473,7 @@ const editForm = reactive({
   sonnet_mapped_model: editMessagesDispatchDefaults.sonnet_mapped_model,
   haiku_mapped_model: editMessagesDispatchDefaults.haiku_mapped_model,
   forced_reasoning_effort: editMessagesDispatchDefaults.forced_reasoning_effort,
+  forced_fast_mode: editMessagesDispatchDefaults.forced_fast_mode,
   exact_model_mappings: [] as MessagesDispatchMappingRow[],
   // 账号过滤控制（OpenAI/Antigravity 平台）
   require_oauth_only: false,
@@ -3616,6 +3712,7 @@ const handleCreateGroup = async () => {
               sonnet_mapped_model: createForm.sonnet_mapped_model,
               haiku_mapped_model: createForm.haiku_mapped_model,
               forced_reasoning_effort: createForm.forced_reasoning_effort,
+              forced_fast_mode: createForm.forced_fast_mode,
               exact_model_mappings: createForm.exact_model_mappings,
             })
           : undefined,
@@ -3674,6 +3771,7 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.haiku_mapped_model = messagesDispatchFormState.haiku_mapped_model;
   editForm.forced_reasoning_effort =
     messagesDispatchFormState.forced_reasoning_effort;
+  editForm.forced_fast_mode = messagesDispatchFormState.forced_fast_mode;
   editForm.exact_model_mappings =
     messagesDispatchFormState.exact_model_mappings;
   editForm.require_oauth_only = group.require_oauth_only ?? false;
@@ -3744,6 +3842,7 @@ const handleUpdateGroup = async () => {
               sonnet_mapped_model: editForm.sonnet_mapped_model,
               haiku_mapped_model: editForm.haiku_mapped_model,
               forced_reasoning_effort: editForm.forced_reasoning_effort,
+              forced_fast_mode: editForm.forced_fast_mode,
               exact_model_mappings: editForm.exact_model_mappings,
             })
           : undefined,

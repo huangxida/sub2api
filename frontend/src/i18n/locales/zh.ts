@@ -2130,6 +2130,10 @@ export default {
         forcedReasoningHint:
           '选择后会覆盖请求中的 output_config.effort 和模型后缀推导出的思考强度。',
         forcedReasoningInherit: '沿用请求/默认值',
+        forcedFastTitle: '强制 Fast 模式',
+        forcedFastLabel: '强制使用 fast(priority)',
+        forcedFastHint:
+          '开启后会覆盖请求是否携带 fast beta，并强制给 OpenAI/Codex 上游传 service_tier=priority。',
         reasoningLow: 'Low（低）',
         reasoningMedium: 'Medium（中）',
         reasoningHigh: 'High（高）',

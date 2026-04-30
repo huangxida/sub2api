@@ -19,6 +19,7 @@ func normalizeOpenAIMessagesDispatchModelConfig(cfg OpenAIMessagesDispatchModelC
 		SonnetMappedModel:     normalizeOpenAIMessagesDispatchMappedModel(cfg.SonnetMappedModel),
 		HaikuMappedModel:      normalizeOpenAIMessagesDispatchMappedModel(cfg.HaikuMappedModel),
 		ForcedReasoningEffort: normalizeOpenAIReasoningEffort(cfg.ForcedReasoningEffort),
+		ForcedFastMode:        cfg.ForcedFastMode,
 	}
 
 	if len(cfg.ExactModelMappings) > 0 {
@@ -96,6 +97,13 @@ func (g *Group) ResolveMessagesDispatchForcedReasoningEffort() string {
 		return ""
 	}
 	return normalizeOpenAIReasoningEffort(g.MessagesDispatchModelConfig.ForcedReasoningEffort)
+}
+
+func (g *Group) ResolveMessagesDispatchForcedFastMode() bool {
+	if g == nil {
+		return false
+	}
+	return g.MessagesDispatchModelConfig.ForcedFastMode
 }
 
 func sanitizeGroupMessagesDispatchFields(g *Group) {

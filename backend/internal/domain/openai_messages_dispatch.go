@@ -8,4 +8,5 @@ type OpenAIMessagesDispatchModelConfig struct {
 	HaikuMappedModel      string            `json:"haiku_mapped_model,omitempty"`
 	ExactModelMappings    map[string]string `json:"exact_model_mappings,omitempty"`
 	ForcedReasoningEffort string            `json:"forced_reasoning_effort,omitempty"`
+	ForcedFastMode        bool              `json:"forced_fast_mode,omitempty"`
 }
