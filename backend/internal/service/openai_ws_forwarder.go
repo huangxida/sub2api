@@ -1379,6 +1379,9 @@ func shouldInferIngressFunctionCallOutputPreviousResponseID(
 	if signals.HasFunctionCallOutputMissingCallID {
 		return false
 	}
+	if signals.HasTurnAbortedMarker {
+		return false
+	}
 	// If the client already sent tool-call context or item_reference anchors,
 	// treat this as a full replay / self-contained continuation payload rather
 	// than downgrading it into an inferred delta continuation.
