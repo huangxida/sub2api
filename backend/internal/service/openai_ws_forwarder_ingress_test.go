@@ -225,6 +225,117 @@ func TestSetPreviousResponseIDToRawPayload(t *testing.T) {
 	})
 }
 
+func TestShouldInferIngressFunctionCallOutputPreviousResponseID(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                    string
+		storeDisabled           bool
+		turn                    int
+		signals                 ToolContinuationSignals
+		currentPreviousResponse string
+		expectedPrevious        string
+		want                    bool
+	}{
+		{
+			name:             "infer_when_all_conditions_match",
+			storeDisabled:    true,
+			turn:             2,
+			signals:          ToolContinuationSignals{HasFunctionCallOutput: true},
+			expectedPrevious: "resp_1",
+			want:             true,
+		},
+		{
+			name:             "skip_when_store_enabled",
+			storeDisabled:    false,
+			turn:             2,
+			signals:          ToolContinuationSignals{HasFunctionCallOutput: true},
+			expectedPrevious: "resp_1",
+			want:             false,
+		},
+		{
+			name:             "skip_on_first_turn",
+			storeDisabled:    true,
+			turn:             1,
+			signals:          ToolContinuationSignals{HasFunctionCallOutput: true},
+			expectedPrevious: "resp_1",
+			want:             false,
+		},
+		{
+			name:             "skip_without_function_call_output",
+			storeDisabled:    true,
+			turn:             2,
+			signals:          ToolContinuationSignals{},
+			expectedPrevious: "resp_1",
+			want:             false,
+		},
+		{
+			name:                    "skip_when_request_already_has_previous_response_id",
+			storeDisabled:           true,
+			turn:                    2,
+			signals:                 ToolContinuationSignals{HasFunctionCallOutput: true},
+			currentPreviousResponse: "resp_client",
+			expectedPrevious:        "resp_1",
+			want:                    false,
+		},
+		{
+			name:             "skip_when_last_turn_response_id_missing",
+			storeDisabled:    true,
+			turn:             2,
+			signals:          ToolContinuationSignals{HasFunctionCallOutput: true},
+			expectedPrevious: "",
+			want:             false,
+		},
+		{
+			name:             "trim_whitespace_before_judgement",
+			storeDisabled:    true,
+			turn:             2,
+			signals:          ToolContinuationSignals{HasFunctionCallOutput: true},
+			expectedPrevious: "   resp_2   ",
+			want:             true,
+		},
+		{
+			name:             "skip_when_tool_call_context_already_present",
+			storeDisabled:    true,
+			turn:             2,
+			signals:          ToolContinuationSignals{HasFunctionCallOutput: true, HasToolCallContext: true},
+			expectedPrevious: "resp_2",
+			want:             false,
+		},
+		{
+			name:             "skip_when_item_reference_already_covers_all_call_ids",
+			storeDisabled:    true,
+			turn:             2,
+			signals:          ToolContinuationSignals{HasFunctionCallOutput: true, HasItemReferenceForAllCallIDs: true},
+			expectedPrevious: "resp_2",
+			want:             false,
+		},
+		{
+			name:             "skip_when_function_call_output_missing_call_id",
+			storeDisabled:    true,
+			turn:             2,
+			signals:          ToolContinuationSignals{HasFunctionCallOutput: true, HasFunctionCallOutputMissingCallID: true},
+			expectedPrevious: "resp_2",
+			want:             false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := shouldInferIngressFunctionCallOutputPreviousResponseID(
+				tt.storeDisabled,
+				tt.turn,
+				tt.signals,
+				tt.currentPreviousResponse,
+				tt.expectedPrevious,
+			)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestOpenAIWSInputIsPrefixExtended(t *testing.T) {
 	t.Parallel()
 
