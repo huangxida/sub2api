@@ -2046,6 +2046,10 @@ export default {
         forcedReasoningHint:
           'When selected, this overrides request output_config.effort and reasoning inferred from model suffixes.',
         forcedReasoningInherit: 'Inherit request/default',
+        forcedFastTitle: 'Forced Fast Mode',
+        forcedFastLabel: 'Force fast(priority)',
+        forcedFastHint:
+          'When enabled, this overrides whether the request carries the fast beta and forces service_tier=priority for the OpenAI/Codex upstream.',
         reasoningLow: 'Low',
         reasoningMedium: 'Medium',
         reasoningHigh: 'High',

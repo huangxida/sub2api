@@ -740,10 +740,12 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 			forwardBody = h.gatewayService.ReplaceModelInBody(body, channelMappingMsg.MappedModel)
 		}
 		forcedReasoningEffort := ""
+		forcedFastMode := false
 		if apiKey.Group != nil {
 			forcedReasoningEffort = apiKey.Group.ResolveMessagesDispatchForcedReasoningEffort()
+			forcedFastMode = apiKey.Group.ResolveMessagesDispatchForcedFastMode()
 		}
-		result, err := h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel, forcedReasoningEffort)
+		result, err := h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel, forcedReasoningEffort, forcedFastMode)
 
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		if accountReleaseFunc != nil {

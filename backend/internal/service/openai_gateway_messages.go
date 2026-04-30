@@ -32,6 +32,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 	forcedReasoningEffort string,
+	forcedFastMode bool,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 
@@ -64,8 +65,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	responsesReq.Stream = true
 	isStream := true
 
-	// 2b. Handle BetaFastMode → service_tier: "priority"
-	if containsBetaToken(c.GetHeader("anthropic-beta"), claude.BetaFastMode) {
+	// 2b. Handle forced fast mode or BetaFastMode → service_tier: "priority"
+	if forcedFastMode || containsBetaToken(c.GetHeader("anthropic-beta"), claude.BetaFastMode) {
 		responsesReq.ServiceTier = "priority"
 	}
 
@@ -155,15 +156,17 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 4c. Apply OpenAI fast policy (may filter service_tier or block the request).
 	// Mirrors the Claude anthropic-beta "fast-mode-2026-02-01" filter, but keyed
 	// on the body-level service_tier field (priority/flex).
-	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
-	if policyErr != nil {
-		var blocked *OpenAIFastBlockedError
-		if errors.As(policyErr, &blocked) {
-			writeAnthropicError(c, http.StatusForbidden, "forbidden_error", blocked.Message)
+	if !forcedFastMode {
+		updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+		if policyErr != nil {
+			var blocked *OpenAIFastBlockedError
+			if errors.As(policyErr, &blocked) {
+				writeAnthropicError(c, http.StatusForbidden, "forbidden_error", blocked.Message)
+			}
+			return nil, policyErr
 		}
-		return nil, policyErr
+		responsesBody = updatedBody
 	}
-	responsesBody = updatedBody
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)

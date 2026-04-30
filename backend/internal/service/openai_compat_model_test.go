@@ -113,7 +113,7 @@ func TestForwardAsAnthropic_NormalizesRoutingAndEffortForGpt54XHigh(t *testing.T
 		},
 	}
 
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1", "")
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1", "", false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "gpt-5.4-xhigh", result.Model)
@@ -129,6 +129,50 @@ func TestForwardAsAnthropic_NormalizesRoutingAndEffortForGpt54XHigh(t *testing.T
 	require.Equal(t, "ok", gjson.GetBytes(rec.Body.Bytes(), "content.0.text").String())
 	t.Logf("upstream body: %s", string(upstream.lastBody))
 	t.Logf("response body: %s", rec.Body.String())
+}
+
+func TestForwardAsAnthropic_ForcedFastModeBypassesDefaultFastFilter(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"claude-sonnet-4-5-20250929","max_tokens":16,"messages":[{"role":"user","content":"hello"}],"stream":false}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.completed","response":{"id":"resp_1","object":"response","model":"gpt-5.3-codex","status":"completed","output":[{"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_forced_fast"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+
+	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
+	svc.cfg = &config.Config{}
+	svc.httpUpstream = upstream
+	account := &Account{
+		ID:          1,
+		Name:        "openai-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key": "sk-test",
+		},
+	}
+
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.3-codex", "", true)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "priority", gjson.GetBytes(upstream.lastBody, "service_tier").String())
+	require.NotNil(t, result.ServiceTier)
+	require.Equal(t, "priority", *result.ServiceTier)
 }
 
 func TestForwardAsAnthropic_ForcedCodexInstructionsTemplatePrependsRenderedInstructions(t *testing.T) {
@@ -176,7 +220,7 @@ func TestForwardAsAnthropic_ForcedCodexInstructionsTemplatePrependsRenderedInstr
 		},
 	}
 
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1", "")
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1", "", false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "server-prefix\n\nclient-system", gjson.GetBytes(upstream.lastBody, "instructions").String())
@@ -223,7 +267,7 @@ func TestForwardAsAnthropic_ForcedCodexInstructionsTemplateUsesCachedTemplateCon
 		},
 	}
 
-	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1", "")
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-5.1", "", false)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Equal(t, "cached-prefix\n\nclient-system", gjson.GetBytes(upstream.lastBody, "instructions").String())
