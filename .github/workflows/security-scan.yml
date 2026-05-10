@@ -35,7 +35,7 @@ jobs:
       - name: Verify Go version
         run: |
           case "$(go version)" in
-            *"go1.26.2"*) ;;
+            *"go1.26.3"*) ;;
             *)
               echo "unexpected Go version: $(go version)"
               exit 1
@@ -43,6 +43,8 @@ jobs:
           esac
       - name: Run govulncheck
         working-directory: backend
+        env:
+          GOTOOLCHAIN: local
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
