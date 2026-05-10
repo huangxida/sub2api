@@ -3332,6 +3332,64 @@
               </p>
             </div>
             <div class="space-y-5 p-6">
+              <!-- OpenAI Unknown Model Fallback -->
+              <div
+                class="grid gap-4 rounded-lg border border-gray-100 p-4 dark:border-dark-700 md:grid-cols-2"
+              >
+                <div class="md:col-span-2">
+                  <label
+                    class="text-sm font-medium text-gray-700 dark:text-gray-300"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiUnknownModelFallback",
+                      )
+                    }}
+                  </label>
+                  <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiUnknownModelFallbackHint",
+                      )
+                    }}
+                  </p>
+                </div>
+                <div>
+                  <label
+                    class="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiUnknownModelFallbackModel",
+                      )
+                    }}
+                  </label>
+                  <input
+                    v-model="form.openai_unknown_model_fallback_model"
+                    type="text"
+                    class="input w-full"
+                    data-testid="openai-unknown-model-fallback-model"
+                    placeholder="gpt-5.5"
+                  />
+                </div>
+                <div>
+                  <label
+                    class="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400"
+                  >
+                    {{
+                      t(
+                        "admin.settings.gatewayForwarding.openaiUnknownModelFallbackScope",
+                      )
+                    }}
+                  </label>
+                  <Select
+                    v-model="form.openai_unknown_model_fallback_scope"
+                    :options="openaiUnknownModelFallbackScopeOptions"
+                    data-testid="openai-unknown-model-fallback-scope"
+                  />
+                </div>
+              </div>
+
               <!-- Fingerprint Unification -->
               <div class="flex items-center justify-between">
                 <div>
@@ -6464,6 +6522,8 @@ const form = reactive<SettingsForm>({
   fallback_model_openai: "gpt-4o",
   fallback_model_gemini: "gemini-2.5-pro",
   fallback_model_antigravity: "gemini-2.5-pro",
+  openai_unknown_model_fallback_model: "gpt-5.5",
+  openai_unknown_model_fallback_scope: "oauth",
   // Identity patch (Claude -> Gemini)
   enable_identity_patch: true,
   identity_patch_prompt: "",
@@ -7543,6 +7603,10 @@ async function saveSettings() {
       fallback_model_openai: form.fallback_model_openai,
       fallback_model_gemini: form.fallback_model_gemini,
       fallback_model_antigravity: form.fallback_model_antigravity,
+      openai_unknown_model_fallback_model:
+        form.openai_unknown_model_fallback_model,
+      openai_unknown_model_fallback_scope:
+        form.openai_unknown_model_fallback_scope,
       enable_identity_patch: form.enable_identity_patch,
       identity_patch_prompt: form.identity_patch_prompt,
       min_claude_code_version: form.min_claude_code_version,
@@ -8090,6 +8154,19 @@ const openaiFastPolicyScopeOptions = computed(() => [
   {
     value: "bedrock",
     label: t("admin.settings.openaiFastPolicy.scopeBedrock"),
+  },
+]);
+
+const openaiUnknownModelFallbackScopeOptions = computed(() => [
+  {
+    value: "oauth",
+    label: t("admin.settings.gatewayForwarding.openaiUnknownModelScopeOAuth"),
+  },
+  {
+    value: "all_openai",
+    label: t(
+      "admin.settings.gatewayForwarding.openaiUnknownModelScopeAllOpenAI",
+    ),
   },
 ]);
 

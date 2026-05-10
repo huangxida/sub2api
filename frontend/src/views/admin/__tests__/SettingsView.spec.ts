@@ -601,6 +601,34 @@ describe("admin SettingsView payment visible method controls", () => {
     );
   });
 
+  it("submits OpenAI unknown model fallback settings", async () => {
+    getSettings.mockResolvedValueOnce({
+      ...baseSettingsResponse,
+      openai_unknown_model_fallback_model: "gpt-5.5",
+      openai_unknown_model_fallback_scope: "oauth",
+    });
+
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper
+      .get('[data-testid="openai-unknown-model-fallback-model"]')
+      .setValue("gpt-5.4");
+    await wrapper
+      .get('[data-testid="openai-unknown-model-fallback-scope"]')
+      .setValue("all_openai");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(updateSettings).toHaveBeenCalledTimes(1);
+    expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openai_unknown_model_fallback_model: "gpt-5.4",
+        openai_unknown_model_fallback_scope: "all_openai",
+      }),
+    );
+  });
+
   it("updates provider enablement immediately and reloads providers", async () => {
     const provider = {
       id: 7,
