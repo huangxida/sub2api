@@ -619,7 +619,44 @@ func (a *Account) IsModelSupported(requestedModel string) bool {
 		return true
 	}
 	normalized := normalizeRequestedModelForLookup(a.Platform, requestedModel)
-	return normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized)
+	if normalized != requestedModel && mappingSupportsRequestedModel(mapping, normalized) {
+		return true
+	}
+	if baseModel, effort := splitOpenAIReasoningModelAlias(requestedModel); effort != "" {
+		return mappingSupportsRequestedModel(mapping, baseModel)
+	}
+	return false
+}
+
+// IsModelExplicitlyAllowedByMapping reports whether model is explicitly present
+// in account model_mapping, either as a matching source rule or as a target.
+func (a *Account) IsModelExplicitlyAllowedByMapping(model string) bool {
+	if a == nil {
+		return false
+	}
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		return false
+	}
+	mapping := a.GetModelMapping()
+	if len(mapping) == 0 {
+		return false
+	}
+	if _, matched := resolveRequestedModelInMapping(mapping, trimmed); matched {
+		return true
+	}
+	normalized := normalizeRequestedModelForLookup(a.Platform, trimmed)
+	if normalized != trimmed {
+		if _, matched := resolveRequestedModelInMapping(mapping, normalized); matched {
+			return true
+		}
+	}
+	for _, target := range mapping {
+		if strings.TrimSpace(target) == trimmed {
+			return true
+		}
+	}
+	return false
 }
 
 // GetMappedModel 获取映射后的模型名（支持通配符，最长优先匹配）

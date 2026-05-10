@@ -1541,6 +1541,10 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyFallbackModelOpenAI] = settings.FallbackModelOpenAI
 	updates[SettingKeyFallbackModelGemini] = settings.FallbackModelGemini
 	updates[SettingKeyFallbackModelAntigravity] = settings.FallbackModelAntigravity
+	settings.OpenAIUnknownModelFallbackModel = normalizeOpenAIUnknownModelFallbackModel(settings.OpenAIUnknownModelFallbackModel)
+	settings.OpenAIUnknownModelFallbackScope = normalizeOpenAIUnknownModelFallbackScope(settings.OpenAIUnknownModelFallbackScope)
+	updates[SettingKeyOpenAIUnknownModelFallbackModel] = settings.OpenAIUnknownModelFallbackModel
+	updates[SettingKeyOpenAIUnknownModelFallbackScope] = settings.OpenAIUnknownModelFallbackScope
 
 	// Identity patch configuration (Claude -> Gemini)
 	updates[SettingKeyEnableIdentityPatch] = strconv.FormatBool(settings.EnableIdentityPatch)
@@ -2328,6 +2332,9 @@ func (s *SettingService) InitializeDefaultSettings(ctx context.Context) error {
 		SettingKeyFallbackModelOpenAI:      "gpt-4o",
 		SettingKeyFallbackModelGemini:      "gemini-2.5-pro",
 		SettingKeyFallbackModelAntigravity: "gemini-2.5-pro",
+		// OpenAI unknown model fallback defaults
+		SettingKeyOpenAIUnknownModelFallbackModel: defaultOpenAIUnknownModelFallbackModel,
+		SettingKeyOpenAIUnknownModelFallbackScope: OpenAIUnknownModelFallbackScopeOAuth,
 		// Identity patch defaults
 		SettingKeyEnableIdentityPatch: "true",
 		SettingKeyIdentityPatchPrompt: "",
@@ -2677,6 +2684,12 @@ func (s *SettingService) parseSettings(settings map[string]string) *SystemSettin
 	result.FallbackModelOpenAI = s.getStringOrDefault(settings, SettingKeyFallbackModelOpenAI, "gpt-4o")
 	result.FallbackModelGemini = s.getStringOrDefault(settings, SettingKeyFallbackModelGemini, "gemini-2.5-pro")
 	result.FallbackModelAntigravity = s.getStringOrDefault(settings, SettingKeyFallbackModelAntigravity, "gemini-2.5-pro")
+	result.OpenAIUnknownModelFallbackModel = normalizeOpenAIUnknownModelFallbackModel(
+		s.getStringOrDefault(settings, SettingKeyOpenAIUnknownModelFallbackModel, defaultOpenAIUnknownModelFallbackModel),
+	)
+	result.OpenAIUnknownModelFallbackScope = normalizeOpenAIUnknownModelFallbackScope(
+		s.getStringOrDefault(settings, SettingKeyOpenAIUnknownModelFallbackScope, OpenAIUnknownModelFallbackScopeOAuth),
+	)
 
 	// Identity patch settings (default: enabled, to preserve existing behavior)
 	if v, ok := settings[SettingKeyEnableIdentityPatch]; ok && v != "" {
@@ -3083,6 +3096,28 @@ func (s *SettingService) GetFallbackModel(ctx context.Context, platform string) 
 		return defaultModel
 	}
 	return value
+}
+
+func (s *SettingService) GetOpenAIUnknownModelFallbackSettings(ctx context.Context) OpenAIUnknownModelFallbackSettings {
+	settings := DefaultOpenAIUnknownModelFallbackSettings()
+	if s == nil || s.settingRepo == nil {
+		return settings
+	}
+
+	values, err := s.settingRepo.GetMultiple(ctx, []string{
+		SettingKeyOpenAIUnknownModelFallbackModel,
+		SettingKeyOpenAIUnknownModelFallbackScope,
+	})
+	if err != nil {
+		return settings
+	}
+	if raw, ok := values[SettingKeyOpenAIUnknownModelFallbackModel]; ok {
+		settings.Model = normalizeOpenAIUnknownModelFallbackModel(raw)
+	}
+	if raw, ok := values[SettingKeyOpenAIUnknownModelFallbackScope]; ok {
+		settings.Scope = normalizeOpenAIUnknownModelFallbackScope(raw)
+	}
+	return settings
 }
 
 // GetLinuxDoConnectOAuthConfig 返回用于登录的"最终生效" LinuxDo Connect 配置。
