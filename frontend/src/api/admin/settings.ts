@@ -4,7 +4,12 @@
  */
 
 import { apiClient } from "../client";
-import type { CustomMenuItem, CustomEndpoint, NotifyEmailEntry } from "@/types";
+import type {
+  CustomEndpoint,
+  CustomMenuItem,
+  LoginAgreementDocument,
+  NotifyEmailEntry,
+} from "@/types";
 
 export interface DefaultSubscriptionSetting {
   group_id: number;
@@ -314,6 +319,10 @@ export interface SystemSettings {
   invitation_code_enabled: boolean;
   totp_enabled: boolean; // TOTP 双因素认证
   totp_encryption_key_configured: boolean; // TOTP 加密密钥是否已配置
+  login_agreement_enabled: boolean;
+  login_agreement_mode: "modal" | "checkbox" | string;
+  login_agreement_updated_at: string;
+  login_agreement_documents: LoginAgreementDocument[];
   // Default settings
   default_balance: number;
   affiliate_rebate_rate: number;
@@ -445,6 +454,8 @@ export interface SystemSettings {
   fallback_model_openai: string;
   fallback_model_gemini: string;
   fallback_model_antigravity: string;
+  openai_unknown_model_fallback_model: string;
+  openai_unknown_model_fallback_scope: "oauth" | "all_openai" | string;
 
   // Identity patch configuration (Claude -> Gemini)
   enable_identity_patch: boolean;
@@ -528,6 +539,10 @@ export interface UpdateSettingsRequest {
   frontend_url?: string;
   invitation_code_enabled?: boolean;
   totp_enabled?: boolean; // TOTP 双因素认证
+  login_agreement_enabled?: boolean;
+  login_agreement_mode?: "modal" | "checkbox" | string;
+  login_agreement_updated_at?: string;
+  login_agreement_documents?: LoginAgreementDocument[];
   default_balance?: number;
   affiliate_rebate_rate?: number;
   affiliate_rebate_freeze_hours?: number;
@@ -647,6 +662,8 @@ export interface UpdateSettingsRequest {
   fallback_model_openai?: string;
   fallback_model_gemini?: string;
   fallback_model_antigravity?: string;
+  openai_unknown_model_fallback_model?: string;
+  openai_unknown_model_fallback_scope?: "oauth" | "all_openai" | string;
   enable_identity_patch?: boolean;
   identity_patch_prompt?: string;
   ops_monitoring_enabled?: boolean;

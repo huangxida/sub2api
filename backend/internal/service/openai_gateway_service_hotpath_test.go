@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestExtractOpenAIRequestMetaFromBody(t *testing.T) {
@@ -73,10 +74,11 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 			wantValue: "xhigh",
 		},
 		{
-			name:    "minimal 归一化为空",
-			body:    []byte(`{"reasoning":{"effort":"minimal"}}`),
-			model:   "gpt-5-high",
-			wantNil: true,
+			name:      "minimal 归一化为 none",
+			body:      []byte(`{"reasoning":{"effort":"minimal"}}`),
+			model:     "gpt-5-high",
+			wantNil:   false,
+			wantValue: "none",
 		},
 		{
 			name:      "缺失字段时从模型后缀推导",
@@ -91,6 +93,13 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 			model:   "gpt-5-unknown",
 			wantNil: true,
 		},
+		{
+			name:      "unknown alias suffix derives effort",
+			body:      []byte(`{"input":"hi"}`),
+			model:     "codex-auto-review-low",
+			wantNil:   false,
+			wantValue: "low",
+		},
 	}
 
 	for _, tt := range tests {
@@ -104,6 +113,18 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 			require.Equal(t, tt.wantValue, *got)
 		})
 	}
+}
+
+func TestNormalizeOpenAIReasoningEffortInBody(t *testing.T) {
+	body, changed, err := normalizeOpenAIReasoningEffortInBody([]byte(`{"reasoning":{"effort":"minimal"}}`))
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "none", gjson.GetBytes(body, "reasoning.effort").String())
+
+	body, changed, err = normalizeOpenAIReasoningEffortInBody([]byte(`{"reasoning_effort":"x-high"}`))
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "xhigh", gjson.GetBytes(body, "reasoning_effort").String())
 }
 
 func TestGetOpenAIRequestBodyMap_UsesContextCache(t *testing.T) {

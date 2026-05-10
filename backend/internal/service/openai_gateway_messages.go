@@ -50,7 +50,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// 2. Model mapping
 	billingModel := resolveOpenAIForwardModel(account, normalizedModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	normalization := normalizeOpenAIModelForUpstreamWithUnknownFallback(
+		account,
+		billingModel,
+		s.getOpenAIUnknownModelFallbackSettings(ctx),
+	)
+	upstreamModel := normalization.Model
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
 	apiKeyID := getAPIKeyIDFromContext(c)
 	anthropicDigestChain := ""
@@ -101,7 +106,14 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			responsesReq.Reasoning = &apicompat.ResponsesReasoning{Summary: "auto"}
 		}
 		responsesReq.Reasoning.Effort = forcedReasoningEffort
+	} else if normalization.DerivedReasoningEffort != "" &&
+		(responsesReq.Reasoning == nil || strings.TrimSpace(responsesReq.Reasoning.Effort) == "") {
+		if responsesReq.Reasoning == nil {
+			responsesReq.Reasoning = &apicompat.ResponsesReasoning{Summary: "auto"}
+		}
+		responsesReq.Reasoning.Effort = normalization.DerivedReasoningEffort
 	}
+	normalizeOpenAIResponsesRequestReasoning(responsesReq)
 
 	// Upstream always uses streaming (upstream may not support sync mode).
 	// The client's original preference determines the response format.

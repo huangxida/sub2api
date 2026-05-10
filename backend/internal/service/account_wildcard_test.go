@@ -197,6 +197,17 @@ func TestAccountIsModelSupported(t *testing.T) {
 			expected:       true,
 		},
 		{
+			name:     "openai reasoning suffix alias matches base model whitelist",
+			platform: PlatformOpenAI,
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gpt-5.6": "gpt-5.6",
+				},
+			},
+			requestedModel: "gpt-5.6-high",
+			expected:       true,
+		},
+		{
 			name: "wildcard match not supported",
 			credentials: map[string]any{
 				"model_mapping": map[string]any{
@@ -405,6 +416,86 @@ func TestAccountResolveMappedModel(t *testing.T) {
 			mappedModel, matched := account.ResolveMappedModel(tt.requestedModel)
 			if mappedModel != tt.expectedModel || matched != tt.expectedMatch {
 				t.Fatalf("ResolveMappedModel(%q) = (%q, %v), want (%q, %v)", tt.requestedModel, mappedModel, matched, tt.expectedModel, tt.expectedMatch)
+			}
+		})
+	}
+}
+
+func TestAccountIsModelExplicitlyAllowedByMapping(t *testing.T) {
+	tests := []struct {
+		name        string
+		platform    string
+		credentials map[string]any
+		model       string
+		expected    bool
+	}{
+		{
+			name:        "no mapping is not an explicit allow",
+			credentials: nil,
+			model:       "gpt-5.6",
+			expected:    false,
+		},
+		{
+			name: "exact whitelist self mapping is explicit allow",
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gpt-5.6": "gpt-5.6",
+				},
+			},
+			model:    "gpt-5.6",
+			expected: true,
+		},
+		{
+			name: "mapping target is explicit allow",
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"future-gpt": "gpt-6",
+				},
+			},
+			model:    "gpt-6",
+			expected: true,
+		},
+		{
+			name: "wildcard source match is explicit allow",
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gpt-5.*": "gpt-5.6",
+				},
+			},
+			model:    "gpt-5.6",
+			expected: true,
+		},
+		{
+			name:     "gemini normalized source match is explicit allow",
+			platform: PlatformGemini,
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
+				},
+			},
+			model:    "gemini-3.1-pro-preview-customtools",
+			expected: true,
+		},
+		{
+			name: "missing model is not explicit allow",
+			credentials: map[string]any{
+				"model_mapping": map[string]any{
+					"gpt-5.6": "gpt-5.6",
+				},
+			},
+			model:    "gpt-6",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			account := &Account{
+				Platform:    tt.platform,
+				Credentials: tt.credentials,
+			}
+			if got := account.IsModelExplicitlyAllowedByMapping(tt.model); got != tt.expected {
+				t.Fatalf("IsModelExplicitlyAllowedByMapping(%q) = %v, want %v", tt.model, got, tt.expected)
 			}
 		})
 	}

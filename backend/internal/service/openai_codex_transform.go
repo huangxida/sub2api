@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -61,6 +62,30 @@ var codexVersionModelPrefixes = []struct {
 	{prefix: "gpt-5.5", target: "gpt-5.5"},
 	{prefix: "gpt-5.4", target: "gpt-5.4"},
 	{prefix: "gpt-5.2", target: "gpt-5.2"},
+}
+
+const (
+	defaultOpenAIUnknownModelFallbackModel = "gpt-5.5"
+
+	OpenAIUnknownModelFallbackScopeOAuth     = "oauth"
+	OpenAIUnknownModelFallbackScopeAllOpenAI = "all_openai"
+)
+
+type OpenAIUnknownModelFallbackSettings struct {
+	Model string
+	Scope string
+}
+
+type openAIModelNormalizationResult struct {
+	Model                  string
+	Known                  bool
+	UnknownFallbackApplied bool
+	DerivedReasoningEffort string
+}
+
+type openAIReasoningAliasNormalization struct {
+	BaseModel string
+	Effort    string
 }
 
 type codexTransformResult struct {
@@ -833,10 +858,185 @@ func normalizeOpenAIResponsesImageOnlyModel(reqBody map[string]any) bool {
 }
 
 func normalizeOpenAIModelForUpstream(account *Account, model string) string {
-	if account == nil || account.Type == AccountTypeOAuth {
-		return normalizeCodexModel(model)
+	return normalizeOpenAIModelForUpstreamWithUnknownFallback(
+		account,
+		model,
+		OpenAIUnknownModelFallbackSettings{},
+	).Model
+}
+
+func normalizeOpenAIModelForUpstreamWithUnknownFallback(
+	account *Account,
+	model string,
+	settings OpenAIUnknownModelFallbackSettings,
+) openAIModelNormalizationResult {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		trimmed = "gpt-5.4"
 	}
+
+	if account == nil || account.Type == AccountTypeOAuth {
+		if mapped, ok := normalizeKnownCodexModel(trimmed); ok {
+			return openAIModelNormalizationResult{Model: mapped, Known: true}
+		}
+		if isKnownOpenAINativeModel(trimmed) {
+			return openAIModelNormalizationResult{Model: trimmed, Known: true}
+		}
+	} else if !openAIUnknownModelFallbackApplies(account, settings) {
+		return openAIModelNormalizationResult{Model: trimmed}
+	} else if mapped, ok := normalizeKnownCodexModel(trimmed); ok {
+		return openAIModelNormalizationResult{Model: mapped, Known: true}
+	} else if isKnownOpenAINativeModel(trimmed) {
+		return openAIModelNormalizationResult{Model: trimmed, Known: true}
+	}
+
+	if accountExplicitlyAllowsOpenAIUpstreamModel(account, trimmed) {
+		return openAIModelNormalizationResult{Model: trimmed, Known: true}
+	}
+	if alias := explicitlyAllowedOpenAIReasoningAlias(account, trimmed); alias.BaseModel != "" {
+		return openAIModelNormalizationResult{
+			Model:                  alias.BaseModel,
+			Known:                  true,
+			DerivedReasoningEffort: alias.Effort,
+		}
+	}
+
+	fallbackModel := strings.TrimSpace(settings.Model)
+	if fallbackModel == "" {
+		return openAIModelNormalizationResult{Model: trimmed}
+	}
+	fallbackModel = normalizeCodexModel(fallbackModel)
+	if fallbackModel == "" {
+		return openAIModelNormalizationResult{Model: trimmed}
+	}
+
+	return openAIModelNormalizationResult{
+		Model:                  fallbackModel,
+		UnknownFallbackApplied: true,
+		DerivedReasoningEffort: deriveOpenAIReasoningEffortFromModel(trimmed),
+	}
+}
+
+func accountExplicitlyAllowsOpenAIUpstreamModel(account *Account, model string) bool {
+	if account == nil {
+		return false
+	}
+	if account.Platform != "" && account.Platform != PlatformOpenAI {
+		return false
+	}
+	return account.IsModelExplicitlyAllowedByMapping(model)
+}
+
+func explicitlyAllowedOpenAIReasoningAlias(account *Account, model string) openAIReasoningAliasNormalization {
+	if account == nil {
+		return openAIReasoningAliasNormalization{}
+	}
+	if account.Platform != "" && account.Platform != PlatformOpenAI {
+		return openAIReasoningAliasNormalization{}
+	}
+	baseModel, effort := splitOpenAIReasoningModelAlias(model)
+	if baseModel == "" || effort == "" {
+		return openAIReasoningAliasNormalization{}
+	}
+	if account.IsModelExplicitlyAllowedByMapping(baseModel) {
+		return openAIReasoningAliasNormalization{BaseModel: baseModel, Effort: effort}
+	}
+	return openAIReasoningAliasNormalization{}
+}
+
+func splitOpenAIReasoningModelAlias(model string) (baseModel, effort string) {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		return "", ""
+	}
+	for _, suffix := range []string{"-minimal", "-xhigh", "-medium", "-none", "-high", "-low"} {
+		if strings.HasSuffix(strings.ToLower(trimmed), suffix) {
+			base := strings.TrimSpace(trimmed[:len(trimmed)-len(suffix)])
+			effort := normalizeOpenAIReasoningEffort(strings.TrimPrefix(suffix, "-"))
+			if base == "" || effort == "" {
+				return "", ""
+			}
+			return base, effort
+		}
+	}
+	return "", ""
+}
+
+func openAIUnknownModelFallbackApplies(account *Account, settings OpenAIUnknownModelFallbackSettings) bool {
+	if account == nil {
+		return true
+	}
+	if account.Platform != "" && account.Platform != PlatformOpenAI {
+		return false
+	}
+	scope := normalizeOpenAIUnknownModelFallbackScope(settings.Scope)
+	switch scope {
+	case OpenAIUnknownModelFallbackScopeAllOpenAI:
+		return true
+	default:
+		return account.Type == AccountTypeOAuth
+	}
+}
+
+func isKnownOpenAINativeModel(model string) bool {
+	modelID := strings.ToLower(strings.TrimSpace(lastOpenAIModelSegment(model)))
+	if modelID == "" {
+		return false
+	}
+	if strings.HasPrefix(modelID, "ft:") {
+		return true
+	}
+	if isOpenAIImageGenerationModel(modelID) {
+		return true
+	}
+	prefixes := []string{
+		"gpt-4",
+		"gpt-3.5",
+		"o1",
+		"o3",
+		"o4",
+		"chatgpt-",
+		"text-embedding-",
+		"text-moderation-",
+		"omni-moderation-",
+		"dall-e-",
+		"tts-",
+		"whisper-",
+		"computer-use-",
+	}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(modelID, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func DefaultOpenAIUnknownModelFallbackSettings() OpenAIUnknownModelFallbackSettings {
+	return OpenAIUnknownModelFallbackSettings{
+		Model: defaultOpenAIUnknownModelFallbackModel,
+		Scope: OpenAIUnknownModelFallbackScopeOAuth,
+	}
+}
+
+func normalizeOpenAIUnknownModelFallbackModel(model string) string {
 	return strings.TrimSpace(model)
+}
+
+func normalizeOpenAIUnknownModelFallbackScope(scope string) string {
+	switch strings.ToLower(strings.TrimSpace(scope)) {
+	case OpenAIUnknownModelFallbackScopeAllOpenAI:
+		return OpenAIUnknownModelFallbackScopeAllOpenAI
+	default:
+		return OpenAIUnknownModelFallbackScopeOAuth
+	}
+}
+
+func (s *OpenAIGatewayService) getOpenAIUnknownModelFallbackSettings(ctx context.Context) OpenAIUnknownModelFallbackSettings {
+	if s == nil || s.settingService == nil {
+		return DefaultOpenAIUnknownModelFallbackSettings()
+	}
+	return s.settingService.GetOpenAIUnknownModelFallbackSettings(ctx)
 }
 
 func SupportsVerbosity(model string) bool {

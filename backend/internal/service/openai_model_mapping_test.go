@@ -1,6 +1,10 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
 
 func TestResolveOpenAIForwardModel(t *testing.T) {
 	tests := []struct {
@@ -280,6 +284,168 @@ func TestNormalizeOpenAIModelForUpstream(t *testing.T) {
 			if got := normalizeOpenAIModelForUpstream(tt.account, tt.model); got != tt.want {
 				t.Fatalf("normalizeOpenAIModelForUpstream(...) = %q, want %q", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestNormalizeOpenAIModelForUpstreamWithUnknownFallback(t *testing.T) {
+	defaults := DefaultOpenAIUnknownModelFallbackSettings()
+	tests := []struct {
+		name       string
+		account    *Account
+		model      string
+		settings   OpenAIUnknownModelFallbackSettings
+		wantModel  string
+		wantEffort string
+		wantFB     bool
+	}{
+		{
+			name:      "oauth unknown codex alias falls back",
+			account:   &Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI},
+			model:     "codex-auto-review",
+			settings:  defaults,
+			wantModel: "gpt-5.5",
+			wantFB:    true,
+		},
+		{
+			name:       "oauth unknown alias derives reasoning suffix",
+			account:    &Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI},
+			model:      "foo-model-xhigh",
+			settings:   defaults,
+			wantModel:  "gpt-5.5",
+			wantEffort: "xhigh",
+			wantFB:     true,
+		},
+		{
+			name:      "oauth unknown gpt5 family falls back instead of broad legacy match",
+			account:   &Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI},
+			model:     "gpt-5-new",
+			settings:  defaults,
+			wantModel: "gpt-5.5",
+			wantFB:    true,
+		},
+		{
+			name: "oauth unknown future model allowed by account whitelist passes through",
+			account: &Account{
+				Type:     AccountTypeOAuth,
+				Platform: PlatformOpenAI,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"gpt-5.6": "gpt-5.6",
+					},
+				},
+			},
+			model:     "gpt-5.6",
+			settings:  defaults,
+			wantModel: "gpt-5.6",
+		},
+		{
+			name: "oauth unknown future major model allowed by account whitelist passes through",
+			account: &Account{
+				Type:     AccountTypeOAuth,
+				Platform: PlatformOpenAI,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"gpt-6": "gpt-6",
+					},
+				},
+			},
+			model:     "gpt-6",
+			settings:  defaults,
+			wantModel: "gpt-6",
+		},
+		{
+			name: "oauth unknown future model allowed as mapping target passes through",
+			account: &Account{
+				Type:     AccountTypeOAuth,
+				Platform: PlatformOpenAI,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"future-gpt": "gpt-6",
+					},
+				},
+			},
+			model:     "gpt-6",
+			settings:  defaults,
+			wantModel: "gpt-6",
+		},
+		{
+			name: "oauth unknown future reasoning alias allowed by account whitelist normalizes to base model",
+			account: &Account{
+				Type:     AccountTypeOAuth,
+				Platform: PlatformOpenAI,
+				Credentials: map[string]any{
+					"model_mapping": map[string]any{
+						"gpt-5.6": "gpt-5.6",
+					},
+				},
+			},
+			model:      "gpt-5.6-high",
+			settings:   defaults,
+			wantModel:  "gpt-5.6",
+			wantEffort: "high",
+		},
+		{
+			name:      "known alias stays known",
+			account:   &Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI},
+			model:     "gpt-5.4-high",
+			settings:  defaults,
+			wantModel: "gpt-5.4",
+		},
+		{
+			name:      "api key preserves unknown by default",
+			account:   &Account{Type: AccountTypeAPIKey, Platform: PlatformOpenAI},
+			model:     "codex-auto-review",
+			settings:  defaults,
+			wantModel: "codex-auto-review",
+		},
+		{
+			name:    "api key can opt into all openai fallback",
+			account: &Account{Type: AccountTypeAPIKey, Platform: PlatformOpenAI},
+			model:   "codex-auto-review-low",
+			settings: OpenAIUnknownModelFallbackSettings{
+				Model: "gpt-5.5",
+				Scope: OpenAIUnknownModelFallbackScopeAllOpenAI,
+			},
+			wantModel:  "gpt-5.5",
+			wantEffort: "low",
+			wantFB:     true,
+		},
+		{
+			name:    "all openai scope preserves native api model",
+			account: &Account{Type: AccountTypeAPIKey, Platform: PlatformOpenAI},
+			model:   "gpt-4o",
+			settings: OpenAIUnknownModelFallbackSettings{
+				Model: "gpt-5.5",
+				Scope: OpenAIUnknownModelFallbackScopeAllOpenAI,
+			},
+			wantModel: "gpt-4o",
+		},
+		{
+			name:    "all openai scope preserves native reasoning model",
+			account: &Account{Type: AccountTypeAPIKey, Platform: PlatformOpenAI},
+			model:   "o3-mini",
+			settings: OpenAIUnknownModelFallbackSettings{
+				Model: "gpt-5.5",
+				Scope: OpenAIUnknownModelFallbackScopeAllOpenAI,
+			},
+			wantModel: "o3-mini",
+		},
+		{
+			name:      "empty fallback disables rewrite",
+			account:   &Account{Type: AccountTypeOAuth, Platform: PlatformOpenAI},
+			model:     "codex-auto-review",
+			settings:  OpenAIUnknownModelFallbackSettings{Scope: OpenAIUnknownModelFallbackScopeOAuth},
+			wantModel: "codex-auto-review",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeOpenAIModelForUpstreamWithUnknownFallback(tt.account, tt.model, tt.settings)
+			require.Equal(t, tt.wantModel, got.Model)
+			require.Equal(t, tt.wantEffort, got.DerivedReasoningEffort)
+			require.Equal(t, tt.wantFB, got.UnknownFallbackApplied)
 		})
 	}
 }

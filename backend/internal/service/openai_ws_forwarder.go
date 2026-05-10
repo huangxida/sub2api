@@ -2395,6 +2395,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			ctx = withOpenAIFastPolicyContext(ctx, settings)
 		}
 	}
+	unknownModelFallbackSettings := s.getOpenAIUnknownModelFallbackSettings(ctx)
 
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
@@ -2547,12 +2548,30 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			normalized = next
 		}
-		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(originalModel))
+		modelNormalization := normalizeOpenAIModelForUpstreamWithUnknownFallback(
+			account,
+			account.GetMappedModel(originalModel),
+			unknownModelFallbackSettings,
+		)
+		upstreamModel := modelNormalization.Model
 		if upstreamModel != originalModel {
 			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
 			if setErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
 			}
+			normalized = next
+		}
+		if modelNormalization.DerivedReasoningEffort != "" &&
+			!hasNonEmptyOpenAIReasoningEffortInBody(normalized) {
+			next, setErr := sjson.SetBytes(normalized, "reasoning.effort", modelNormalization.DerivedReasoningEffort)
+			if setErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
+			}
+			normalized = next
+		}
+		if next, effortNormalized, normalizeErr := normalizeOpenAIReasoningEffortInBody(normalized); normalizeErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
+		} else if effortNormalized {
 			normalized = next
 		}
 		imageIntent := IsImageGenerationIntent(openAIResponsesEndpoint, originalModel, normalized)
@@ -2863,7 +2882,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		mappedModel := ""
 		var mappedModelBytes []byte
 		if originalModel != "" {
-			mappedModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(originalModel))
+			mappedModel = normalizeOpenAIModelForUpstreamWithUnknownFallback(
+				account,
+				account.GetMappedModel(originalModel),
+				unknownModelFallbackSettings,
+			).Model
 			needModelReplace = mappedModel != "" && mappedModel != originalModel
 			if needModelReplace {
 				mappedModelBytes = []byte(mappedModel)
@@ -3944,6 +3967,7 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 	requireCompact bool,
+	unknownFallbackSettings OpenAIUnknownModelFallbackSettings,
 ) (*AccountSelectionResult, error) {
 	if s == nil {
 		return nil, nil
@@ -3981,10 +4005,10 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
 	}
-	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+	if !openAIAccountSupportsRequestedOrFallbackModel(account, requestedModel, requireCompact, unknownFallbackSettings) {
 		return nil, nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact)
+	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact, unknownFallbackSettings)
 	if account == nil {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
