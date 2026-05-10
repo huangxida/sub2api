@@ -43,6 +43,7 @@ type OpenAIAccountScheduleRequest struct {
 	StickyAccountID         int64
 	PreviousResponseID      string
 	RequestedModel          string
+	UnknownModelFallback    OpenAIUnknownModelFallbackSettings
 	RequiredTransport       OpenAIUpstreamTransport
 	RequiredImageCapability OpenAIImagesCapability
 	RequireCompact          bool
@@ -260,6 +261,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			req.RequestedModel,
 			req.ExcludedIDs,
 			req.RequireCompact,
+			req.UnknownModelFallback,
 		)
 		if err != nil {
 			return nil, decision, err
@@ -353,7 +355,7 @@ func (s *defaultOpenAIAccountScheduler) selectBySessionHash(
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
 	}
-	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact)
+	account = s.service.recheckSelectedOpenAIAccountFromDB(ctx, account, req.RequestedModel, req.RequireCompact, req.UnknownModelFallback)
 	if account == nil || !s.isAccountTransportCompatible(account, req.RequiredTransport) {
 		_ = s.service.deleteStickySessionAccountID(ctx, req.GroupID, sessionHash)
 		return nil, nil
@@ -822,11 +824,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	compactBlocked := false
 	for i := 0; i < len(selectionOrder); i++ {
 		candidate := selectionOrder[i]
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel, false)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel, false, req.UnknownModelFallback)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false, req.UnknownModelFallback)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			continue
 		}
@@ -853,11 +855,11 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	cfg := s.service.schedulingConfig()
 	// WaitPlan.MaxConcurrency 使用 Concurrency（非 EffectiveLoadFactor），因为 WaitPlan 控制的是 Redis 实际并发槽位等待。
 	for _, candidate := range selectionOrder {
-		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel, false)
+		fresh := s.service.resolveFreshSchedulableOpenAIAccount(ctx, candidate.account, req.RequestedModel, false, req.UnknownModelFallback)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			continue
 		}
-		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false)
+		fresh = s.service.recheckSelectedOpenAIAccountFromDB(ctx, fresh, req.RequestedModel, false, req.UnknownModelFallback)
 		if fresh == nil || !s.isAccountTransportCompatible(fresh, req.RequiredTransport) || !s.isAccountRequestCompatible(ctx, fresh, req) {
 			continue
 		}
@@ -893,12 +895,12 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 	if account == nil {
 		return false
 	}
-	if req.RequestedModel != "" && !account.IsModelSupported(req.RequestedModel) {
+	if !openAIAccountSupportsRequestedOrFallbackModel(account, req.RequestedModel, req.RequireCompact, req.UnknownModelFallback) {
 		return false
 	}
 	if req.GroupID != nil && s != nil && s.service != nil &&
 		s.service.needsUpstreamChannelRestrictionCheck(ctx, req.GroupID) &&
-		s.service.isUpstreamModelRestrictedByChannel(ctx, *req.GroupID, account, req.RequestedModel, req.RequireCompact) {
+		s.service.isUpstreamModelRestrictedByChannel(ctx, *req.GroupID, account, req.RequestedModel, req.RequireCompact, req.UnknownModelFallback) {
 		return false
 	}
 	return account.SupportsOpenAIImageCapability(req.RequiredImageCapability)
@@ -1132,6 +1134,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 		StickyAccountID:         stickyAccountID,
 		PreviousResponseID:      previousResponseID,
 		RequestedModel:          requestedModel,
+		UnknownModelFallback:    s.getOpenAIUnknownModelFallbackSettings(ctx),
 		RequiredTransport:       requiredTransport,
 		RequiredImageCapability: requiredImageCapability,
 		RequireCompact:          requireCompact,

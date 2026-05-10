@@ -1072,3 +1072,51 @@ func TestPassthroughBilling_BlockedFrameDoesNotMutateServiceTier(t *testing.T) {
 	require.Equal(t, "flex", *tier,
 		"blocked frame is never sent upstream; billing must retain the previous turn's tier")
 }
+
+func TestNormalizeOpenAIWSPassthroughPayloadForUpstream_UnknownFallback(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	settings := DefaultOpenAIUnknownModelFallbackSettings()
+
+	frame := []byte(`{"type":"response.create","model":"codex-auto-review-low","service_tier":"fast"}`)
+	updated, upstreamModel, err := normalizeOpenAIWSPassthroughPayloadForUpstream(account, frame, settings)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.5", upstreamModel)
+	require.Equal(t, "gpt-5.5", gjson.GetBytes(updated, "model").String())
+	require.Equal(t, "low", gjson.GetBytes(updated, "reasoning.effort").String())
+
+	explicit := []byte(`{"type":"response.create","model":"foo-model-xhigh","reasoning":{"effort":"minimal"}}`)
+	updated, upstreamModel, err = normalizeOpenAIWSPassthroughPayloadForUpstream(account, explicit, settings)
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.5", upstreamModel)
+	require.Equal(t, "gpt-5.5", gjson.GetBytes(updated, "model").String())
+	require.Equal(t, "none", gjson.GetBytes(updated, "reasoning.effort").String(), "explicit effort wins and is normalized")
+}
+
+func TestNormalizeOpenAIWSPassthroughPayloadForUpstream_ExplicitFutureModelReasoningAlias(t *testing.T) {
+	account := &Account{
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"model_mapping": map[string]any{
+				"gpt-5.6": "gpt-5.6",
+			},
+		},
+	}
+
+	frame := []byte(`{"type":"response.create","model":"gpt-5.6-high"}`)
+	updated, upstreamModel, err := normalizeOpenAIWSPassthroughPayloadForUpstream(account, frame, DefaultOpenAIUnknownModelFallbackSettings())
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.6", upstreamModel)
+	require.Equal(t, "gpt-5.6", gjson.GetBytes(updated, "model").String())
+	require.Equal(t, "high", gjson.GetBytes(updated, "reasoning.effort").String())
+}
+
+func TestNormalizeOpenAIWSPassthroughSessionFrameForUpstream_UnknownFallback(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	frame := []byte(`{"type":"session.update","session":{"model":"codex-auto-review"}}`)
+	updated, upstreamModel, err := normalizeOpenAIWSPassthroughSessionFrameForUpstream(account, frame, DefaultOpenAIUnknownModelFallbackSettings())
+	require.NoError(t, err)
+	require.Equal(t, "gpt-5.5", upstreamModel)
+	require.Equal(t, "gpt-5.5", gjson.GetBytes(updated, "session.model").String())
+}

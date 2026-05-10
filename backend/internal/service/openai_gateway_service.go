@@ -486,11 +486,11 @@ func (s *OpenAIGatewayService) checkChannelPricingRestriction(ctx context.Contex
 	return s.channelService.IsModelRestricted(ctx, *groupID, billingModel)
 }
 
-func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Context, groupID int64, account *Account, requestedModel string, requireCompact bool) bool {
+func (s *OpenAIGatewayService) isUpstreamModelRestrictedByChannel(ctx context.Context, groupID int64, account *Account, requestedModel string, requireCompact bool, unknownFallbackSettings OpenAIUnknownModelFallbackSettings) bool {
 	if s.channelService == nil {
 		return false
 	}
-	upstreamModel := resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact)
+	upstreamModel := resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact, unknownFallbackSettings)
 	if upstreamModel == "" {
 		return false
 	}
@@ -1275,7 +1275,7 @@ func (s *OpenAIGatewayService) SelectAccountForModel(ctx context.Context, groupI
 // SelectAccountForModelWithExclusions selects an account supporting the requested model while excluding specified accounts.
 // SelectAccountForModelWithExclusions 选择支持指定模型的账号，同时排除指定的账号。
 func (s *OpenAIGatewayService) SelectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}) (*Account, error) {
-	return s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, excludedIDs, false, 0)
+	return s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, excludedIDs, false, 0, s.getOpenAIUnknownModelFallbackSettings(ctx))
 }
 
 // noAvailableOpenAISelectionError builds the standard "no account available" error
@@ -1308,11 +1308,35 @@ func openAICompactSupportTier(account *Account) int {
 
 // isOpenAIAccountEligibleForRequest centralises the schedulable / OpenAI / model /
 // compact-support checks used during account selection.
-func isOpenAIAccountEligibleForRequest(account *Account, requestedModel string, requireCompact bool) bool {
+func openAIAccountAllowsSelectionModel(account *Account, model string) bool {
+	if account == nil {
+		return false
+	}
+	if account.IsModelSupported(model) {
+		return true
+	}
+	return account.IsModelExplicitlyAllowedByMapping(model)
+}
+
+func openAIAccountSupportsRequestedOrFallbackModel(account *Account, requestedModel string, requireCompact bool, unknownFallbackSettings OpenAIUnknownModelFallbackSettings) bool {
+	if strings.TrimSpace(requestedModel) == "" {
+		return true
+	}
+	if account.IsModelSupported(requestedModel) {
+		return true
+	}
+	upstreamModel := resolveOpenAIAccountUpstreamModelForRequest(account, requestedModel, requireCompact, unknownFallbackSettings)
+	if strings.TrimSpace(upstreamModel) == "" || upstreamModel == strings.TrimSpace(requestedModel) {
+		return false
+	}
+	return openAIAccountAllowsSelectionModel(account, upstreamModel)
+}
+
+func isOpenAIAccountEligibleForRequest(account *Account, requestedModel string, requireCompact bool, unknownFallbackSettings OpenAIUnknownModelFallbackSettings) bool {
 	if account == nil || !account.IsSchedulable() || !account.IsOpenAI() {
 		return false
 	}
-	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+	if !openAIAccountSupportsRequestedOrFallbackModel(account, requestedModel, requireCompact, unknownFallbackSettings) {
 		return false
 	}
 	if requireCompact && openAICompactSupportTier(account) == 0 {
@@ -1351,18 +1375,26 @@ func prioritizeOpenAICompactAccounts(accounts []*Account) []*Account {
 // resolveOpenAIAccountUpstreamModelForRequest resolves the upstream model that
 // would be sent for a given request, honouring compact-only mappings when the
 // caller is on the /responses/compact path.
-func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool) string {
+func resolveOpenAIAccountUpstreamModelForRequest(account *Account, requestedModel string, requireCompact bool, unknownFallbackSettings OpenAIUnknownModelFallbackSettings) string {
 	upstreamModel := resolveOpenAIForwardModel(account, requestedModel, "")
 	if upstreamModel == "" {
 		return ""
 	}
 	if requireCompact {
-		return resolveOpenAICompactForwardModel(account, upstreamModel)
+		compactModel := resolveOpenAICompactForwardModel(account, upstreamModel)
+		if compactModel != "" && compactModel != upstreamModel {
+			return compactModel
+		}
+		upstreamModel = compactModel
+	}
+	normalization := normalizeOpenAIModelForUpstreamWithUnknownFallback(account, upstreamModel, unknownFallbackSettings)
+	if normalization.Model != "" {
+		return normalization.Model
 	}
 	return upstreamModel
 }
 
-func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64) (*Account, error) {
+func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, unknownFallbackSettings OpenAIUnknownModelFallbackSettings) (*Account, error) {
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
 			"group_id", derefGroupID(groupID),
@@ -1372,7 +1404,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 
 	// 1. 尝试粘性会话命中
 	// Try sticky session hit
-	if account := s.tryStickySessionHit(ctx, groupID, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID); account != nil {
+	if account := s.tryStickySessionHit(ctx, groupID, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, unknownFallbackSettings); account != nil {
 		return account, nil
 	}
 
@@ -1385,7 +1417,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 
 	// 3. 按优先级 + LRU 选择最佳账号
 	// Select by priority + LRU
-	selected, compactBlocked := s.selectBestAccount(ctx, groupID, accounts, requestedModel, excludedIDs, requireCompact)
+	selected, compactBlocked := s.selectBestAccount(ctx, groupID, accounts, requestedModel, excludedIDs, requireCompact, unknownFallbackSettings)
 
 	if selected == nil {
 		return nil, noAvailableOpenAISelectionError(requestedModel, compactBlocked)
@@ -1405,7 +1437,7 @@ func (s *OpenAIGatewayService) selectAccountForModelWithExclusions(ctx context.C
 //
 // tryStickySessionHit attempts to get account from sticky session.
 // Returns account if hit and usable; clears session and returns nil if account is unavailable.
-func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID *int64, sessionHash, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64) *Account {
+func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID *int64, sessionHash, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, stickyAccountID int64, unknownFallbackSettings OpenAIUnknownModelFallbackSettings) *Account {
 	if sessionHash == "" {
 		return nil
 	}
@@ -1437,16 +1469,16 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 
 	// 验证账号是否可用于当前请求
 	// Verify account is usable for current request
-	if !isOpenAIAccountEligibleForRequest(account, requestedModel, false) {
+	if !isOpenAIAccountEligibleForRequest(account, requestedModel, false, unknownFallbackSettings) {
 		return nil
 	}
-	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact)
+	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact, unknownFallbackSettings)
 	if account == nil {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
 	if groupID != nil && s.needsUpstreamChannelRestrictionCheck(ctx, groupID) &&
-		s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
+		s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact, unknownFallbackSettings) {
 		_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 		return nil
 	}
@@ -1464,7 +1496,7 @@ func (s *OpenAIGatewayService) tryStickySessionHit(ctx context.Context, groupID 
 // Returns nil if no available account. The second return reports whether at
 // least one candidate was filtered out solely because it lacks compact support
 // (only meaningful when requireCompact=true).
-func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *int64, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool) (*Account, bool) {
+func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *int64, accounts []Account, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool, unknownFallbackSettings OpenAIUnknownModelFallbackSettings) (*Account, bool) {
 	var selected *Account
 	selectedCompactTier := -1
 	compactBlocked := false
@@ -1479,15 +1511,15 @@ func (s *OpenAIGatewayService) selectBestAccount(ctx context.Context, groupID *i
 			continue
 		}
 
-		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel, false)
+		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel, false, unknownFallbackSettings)
 		if fresh == nil {
 			continue
 		}
-		fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, false)
+		fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, false, unknownFallbackSettings)
 		if fresh == nil {
 			continue
 		}
-		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
+		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact, unknownFallbackSettings) {
 			continue
 		}
 		compactTier := 0
@@ -1564,6 +1596,7 @@ func (s *OpenAIGatewayService) SelectAccountWithLoadAwareness(ctx context.Contex
 }
 
 func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, requireCompact bool) (*AccountSelectionResult, error) {
+	unknownFallbackSettings := s.getOpenAIUnknownModelFallbackSettings(ctx)
 	if s.checkChannelPricingRestriction(ctx, groupID, requestedModel) {
 		slog.Warn("channel pricing restriction blocked request",
 			"group_id", derefGroupID(groupID),
@@ -1580,7 +1613,7 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		}
 	}
 	if s.concurrencyService == nil || !cfg.LoadBatchEnabled {
-		account, err := s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID)
+		account, err := s.selectAccountForModelWithExclusions(ctx, groupID, sessionHash, requestedModel, excludedIDs, requireCompact, stickyAccountID, unknownFallbackSettings)
 		if err != nil {
 			return nil, err
 		}
@@ -1633,11 +1666,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 				if clearSticky {
 					_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 				}
-				if !clearSticky && isOpenAIAccountEligibleForRequest(account, requestedModel, false) {
-					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact)
+				if !clearSticky && isOpenAIAccountEligibleForRequest(account, requestedModel, false, unknownFallbackSettings) {
+					account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact, unknownFallbackSettings)
 					if account == nil {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
-					} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact) {
+					} else if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, account, requestedModel, requireCompact, unknownFallbackSettings) {
 						_ = s.deleteStickySessionAccountID(ctx, groupID, sessionHash)
 					} else {
 						result, err := s.tryAcquireAccountSlot(ctx, accountID, account.Concurrency)
@@ -1675,10 +1708,10 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		if !acc.IsSchedulable() {
 			continue
 		}
-		if requestedModel != "" && !acc.IsModelSupported(requestedModel) {
+		if !openAIAccountSupportsRequestedOrFallbackModel(acc, requestedModel, requireCompact, unknownFallbackSettings) {
 			continue
 		}
-		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, acc, requestedModel, requireCompact) {
+		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, acc, requestedModel, requireCompact, unknownFallbackSettings) {
 			continue
 		}
 		baseCandidateCount++
@@ -1705,15 +1738,15 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			ordered = prioritizeOpenAICompactAccounts(ordered)
 		}
 		for _, acc := range ordered {
-			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel, false)
+			fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel, false, unknownFallbackSettings)
 			if fresh == nil {
 				continue
 			}
-			fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, requireCompact)
+			fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, requireCompact, unknownFallbackSettings)
 			if fresh == nil {
 				continue
 			}
-			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
+			if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact, unknownFallbackSettings) {
 				continue
 			}
 			result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
@@ -1781,15 +1814,15 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 			}
 
 			for _, item := range selectionOrder {
-				fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, requestedModel, false)
+				fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, item.account, requestedModel, false, unknownFallbackSettings)
 				if fresh == nil {
 					continue
 				}
-				fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, requireCompact)
+				fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, requireCompact, unknownFallbackSettings)
 				if fresh == nil {
 					continue
 				}
-				if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
+				if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact, unknownFallbackSettings) {
 					continue
 				}
 				result, err := s.tryAcquireAccountSlot(ctx, fresh.ID, fresh.Concurrency)
@@ -1809,15 +1842,15 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 		candidates = prioritizeOpenAICompactAccounts(candidates)
 	}
 	for _, acc := range candidates {
-		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel, false)
+		fresh := s.resolveFreshSchedulableOpenAIAccount(ctx, acc, requestedModel, false, unknownFallbackSettings)
 		if fresh == nil {
 			continue
 		}
-		fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, requireCompact)
+		fresh = s.recheckSelectedOpenAIAccountFromDB(ctx, fresh, requestedModel, requireCompact, unknownFallbackSettings)
 		if fresh == nil {
 			continue
 		}
-		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact) {
+		if needsUpstreamCheck && s.isUpstreamModelRestrictedByChannel(ctx, *groupID, fresh, requestedModel, requireCompact, unknownFallbackSettings) {
 			continue
 		}
 		return s.newSelectionResult(ctx, fresh, false, nil, &AccountWaitPlan{
@@ -1861,7 +1894,7 @@ func (s *OpenAIGatewayService) tryAcquireAccountSlot(ctx context.Context, accoun
 	return s.concurrencyService.AcquireAccountSlot(ctx, accountID, maxConcurrency)
 }
 
-func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, requestedModel string, requireCompact bool) *Account {
+func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.Context, account *Account, requestedModel string, requireCompact bool, unknownFallbackSettings OpenAIUnknownModelFallbackSettings) *Account {
 	if account == nil {
 		return nil
 	}
@@ -1875,18 +1908,18 @@ func (s *OpenAIGatewayService) resolveFreshSchedulableOpenAIAccount(ctx context.
 		fresh = current
 	}
 
-	if !isOpenAIAccountEligibleForRequest(fresh, requestedModel, requireCompact) {
+	if !isOpenAIAccountEligibleForRequest(fresh, requestedModel, requireCompact, unknownFallbackSettings) {
 		return nil
 	}
 	return fresh
 }
 
-func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Context, account *Account, requestedModel string, requireCompact bool) *Account {
+func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Context, account *Account, requestedModel string, requireCompact bool, unknownFallbackSettings OpenAIUnknownModelFallbackSettings) *Account {
 	if account == nil {
 		return nil
 	}
 	if s.schedulerSnapshot == nil || s.accountRepo == nil {
-		if !isOpenAIAccountEligibleForRequest(account, requestedModel, requireCompact) {
+		if !isOpenAIAccountEligibleForRequest(account, requestedModel, requireCompact, unknownFallbackSettings) {
 			return nil
 		}
 		return account
@@ -1896,7 +1929,7 @@ func (s *OpenAIGatewayService) recheckSelectedOpenAIAccountFromDB(ctx context.Co
 	if err != nil || latest == nil {
 		return nil
 	}
-	if !isOpenAIAccountEligibleForRequest(latest, requestedModel, requireCompact) {
+	if !isOpenAIAccountEligibleForRequest(latest, requestedModel, requireCompact, unknownFallbackSettings) {
 		return nil
 	}
 	return latest
@@ -2256,7 +2289,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	// 以兼容自定义 base_url 的 OpenAI-compatible 上游。
 	if model, ok := reqBody["model"].(string); ok {
 		if !compactMapped {
-			upstreamModel = normalizeOpenAIModelForUpstream(account, model)
+			normalization := normalizeOpenAIModelForUpstreamWithUnknownFallback(
+				account,
+				model,
+				s.getOpenAIUnknownModelFallbackSettings(ctx),
+			)
+			upstreamModel = normalization.Model
+			if normalization.DerivedReasoningEffort != "" && !hasOpenAIReasoningEffort(reqBody) {
+				setOpenAIReasoningEffort(reqBody, normalization.DerivedReasoningEffort)
+				bodyModified = true
+				disablePatch()
+			}
 			if upstreamModel != "" && upstreamModel != model {
 				logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Upstream model resolved: %s -> %s (account: %s, type: %s, isCodexCLI: %v)",
 					model, upstreamModel, account.Name, account.Type, isCodexCLI)
@@ -2276,13 +2319,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	// 规范化 reasoning.effort 参数（minimal -> none），与上游允许值对齐。
-	if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
-		if effort, ok := reasoning["effort"].(string); ok && effort == "minimal" {
-			reasoning["effort"] = "none"
-			bodyModified = true
-			markPatchSet("reasoning.effort", "none")
-			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized reasoning.effort: minimal -> none (account: %s)", account.Name)
-		}
+	if normalizeOpenAIReasoningEffortInRequestBody(reqBody) {
+		bodyModified = true
+		disablePatch()
+		logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Normalized reasoning effort (account: %s)", account.Name)
 	}
 
 	if account.Type == AccountTypeOAuth {
@@ -2865,15 +2905,19 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 ) (*OpenAIForwardResult, error) {
 	normalized := false
 	upstreamPassthroughModel := ""
-	if isOpenAIResponsesCompactPath(c) {
+	unknownFallbackSettings := s.getOpenAIUnknownModelFallbackSettings(ctx)
+	isCompactPassthrough := isOpenAIResponsesCompactPath(c)
+	if isCompactPassthrough {
 		compactMappedModel := resolveOpenAICompactForwardModel(account, reqModel)
-		if compactMappedModel != "" && compactMappedModel != reqModel {
-			nextBody, setErr := sjson.SetBytes(body, "model", compactMappedModel)
-			if setErr != nil {
-				return nil, fmt.Errorf("set compact passthrough model: %w", setErr)
-			}
-			body = nextBody
+		if compactMappedModel != "" {
 			upstreamPassthroughModel = compactMappedModel
+			if compactMappedModel != reqModel {
+				nextBody, setErr := sjson.SetBytes(body, "model", compactMappedModel)
+				if setErr != nil {
+					return nil, fmt.Errorf("set compact passthrough model: %w", setErr)
+				}
+				body = nextBody
+			}
 		}
 	}
 
@@ -2901,7 +2945,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			return nil, fmt.Errorf("openai passthrough rejected before upstream: %s", rejectReason)
 		}
 
-		normalizedBody, bodyNormalized, err := normalizeOpenAIPassthroughOAuthBody(body, isOpenAIResponsesCompactPath(c))
+		normalizedBody, bodyNormalized, err := normalizeOpenAIPassthroughOAuthBody(body, isCompactPassthrough)
 		if err != nil {
 			return nil, err
 		}
@@ -2910,6 +2954,42 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		}
 		normalized = bodyNormalized
 		reqStream = gjson.GetBytes(body, "stream").Bool()
+	}
+
+	if upstreamPassthroughModel == "" {
+		bodyModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+		if bodyModel == "" {
+			bodyModel = reqModel
+		}
+		modelNormalization := normalizeOpenAIModelForUpstreamWithUnknownFallback(account, bodyModel, unknownFallbackSettings)
+		if modelNormalization.Model != "" && modelNormalization.Model != bodyModel {
+			nextBody, setErr := sjson.SetBytes(body, "model", modelNormalization.Model)
+			if setErr != nil {
+				return nil, fmt.Errorf("set passthrough fallback model: %w", setErr)
+			}
+			body = nextBody
+			upstreamPassthroughModel = modelNormalization.Model
+		}
+		if modelNormalization.DerivedReasoningEffort != "" &&
+			!hasNonEmptyOpenAIReasoningEffortInBody(body) {
+			nextBody, setErr := sjson.SetBytes(body, "reasoning.effort", modelNormalization.DerivedReasoningEffort)
+			if setErr != nil {
+				return nil, fmt.Errorf("set passthrough derived reasoning.effort: %w", setErr)
+			}
+			body = nextBody
+			if reasoningEffort == nil {
+				reasoningEffort = &modelNormalization.DerivedReasoningEffort
+			}
+		}
+	}
+
+	if normalizedBody, effortNormalized, normalizeErr := normalizeOpenAIReasoningEffortInBody(body); normalizeErr != nil {
+		return nil, normalizeErr
+	} else if effortNormalized {
+		body = normalizedBody
+		if effort := extractOpenAIReasoningEffortFromBody(body, reqModel); effort != nil {
+			reasoningEffort = effort
+		}
 	}
 
 	sanitizedBody, sanitized, err := sanitizeEmptyBase64InputImagesInOpenAIBody(body)
@@ -5296,9 +5376,20 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	var cost *CostBreakdown
 	var err error
-	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
-	if result.BillingModel != "" {
-		billingModel = strings.TrimSpace(result.BillingModel)
+	resultUpstreamModel := strings.TrimSpace(result.UpstreamModel)
+	if resultUpstreamModel == "" {
+		resultUpstreamModel = strings.TrimSpace(gjson.GetBytes(result.FinalRequestBody, "model").String())
+	}
+	if resultUpstreamModel == "" {
+		resultUpstreamModel = strings.TrimSpace(gjson.GetBytes(input.FinalRequestBody, "model").String())
+	}
+	billingModel := strings.TrimSpace(resultUpstreamModel)
+	if billingModel == "" {
+		billingModel = forwardResultBillingModel(result.Model, resultUpstreamModel)
+	}
+	explicitBillingModel := strings.TrimSpace(result.BillingModel)
+	if explicitBillingModel != "" {
+		billingModel = explicitBillingModel
 	}
 	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" && input.ChannelMappedModel != input.OriginalModel {
 		billingModel = input.ChannelMappedModel
@@ -5308,10 +5399,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 	billingModels := usageBillingModelCandidates(
 		billingModel,
-		result.BillingModel,
+		resultUpstreamModel,
+		result.UpstreamModel,
+		explicitBillingModel,
 		input.ChannelMappedModel,
 		input.OriginalModel,
-		result.UpstreamModel,
 		result.Model,
 	)
 	serviceTier := ""
@@ -5340,6 +5432,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if input.OriginalModel != "" {
 		requestedModel = input.OriginalModel
 	}
+	upstreamModelPtr := optionalNonEqualStringPtr(resultUpstreamModel, requestedModel)
+	modelMappingChain := strings.TrimSpace(input.ModelMappingChain)
+	if modelMappingChain == "" && upstreamModelPtr != nil {
+		modelMappingChain = buildUsageModelMappingChain(requestedModel, *upstreamModelPtr)
+	}
 
 	usageLog := &UsageLog{
 		UserID:              user.ID,
@@ -5348,7 +5445,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		RequestID:           requestID,
 		Model:               result.Model,
 		RequestedModel:      requestedModel,
-		UpstreamModel:       optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		UpstreamModel:       upstreamModelPtr,
 		ServiceTier:         result.ServiceTier,
 		ReasoningEffort:     result.ReasoningEffort,
 		InboundEndpoint:     optionalTrimmedStringPtr(input.InboundEndpoint),
@@ -5384,7 +5481,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	usageLog.CreatedAt = time.Now()
 	// 设置渠道信息
 	usageLog.ChannelID = optionalInt64Ptr(input.ChannelID)
-	usageLog.ModelMappingChain = optionalTrimmedStringPtr(input.ModelMappingChain)
+	usageLog.ModelMappingChain = optionalTrimmedStringPtr(modelMappingChain)
 	// 设置计费模式
 	if cost != nil && cost.BillingMode != "" {
 		billingMode := cost.BillingMode
@@ -5959,6 +6056,103 @@ func detectOpenAIPassthroughInstructionsRejectReason(reqModel string, body []byt
 	return ""
 }
 
+func hasOpenAIReasoningEffort(reqBody map[string]any) bool {
+	_, present := getOpenAIReasoningEffortFromReqBody(reqBody)
+	return present
+}
+
+func normalizeOpenAIReasoningEffortInRequestBody(reqBody map[string]any) bool {
+	if reqBody == nil {
+		return false
+	}
+	if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
+		if effort, ok := reasoning["effort"].(string); ok {
+			normalized := normalizeOpenAIReasoningEffort(effort)
+			if normalized == "" || normalized == effort {
+				return false
+			}
+			reasoning["effort"] = normalized
+			return true
+		}
+	}
+	if effort, ok := reqBody["reasoning_effort"].(string); ok {
+		normalized := normalizeOpenAIReasoningEffort(effort)
+		if normalized == "" || normalized == effort {
+			return false
+		}
+		reqBody["reasoning_effort"] = normalized
+		return true
+	}
+	return false
+}
+
+func normalizeOpenAIReasoningEffortInBody(body []byte) ([]byte, bool, error) {
+	if len(body) == 0 {
+		return body, false, nil
+	}
+	if effort := gjson.GetBytes(body, "reasoning.effort"); effort.Exists() && effort.Type == gjson.String {
+		normalized := normalizeOpenAIReasoningEffort(effort.String())
+		if normalized == "" || normalized == effort.String() {
+			return body, false, nil
+		}
+		updated, err := sjson.SetBytes(body, "reasoning.effort", normalized)
+		if err != nil {
+			return body, false, fmt.Errorf("normalize reasoning.effort: %w", err)
+		}
+		return updated, true, nil
+	}
+	if effort := gjson.GetBytes(body, "reasoning_effort"); effort.Exists() && effort.Type == gjson.String {
+		normalized := normalizeOpenAIReasoningEffort(effort.String())
+		if normalized == "" || normalized == effort.String() {
+			return body, false, nil
+		}
+		updated, err := sjson.SetBytes(body, "reasoning_effort", normalized)
+		if err != nil {
+			return body, false, fmt.Errorf("normalize reasoning_effort: %w", err)
+		}
+		return updated, true, nil
+	}
+	return body, false, nil
+}
+
+func hasNonEmptyOpenAIReasoningEffortInBody(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	if strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String()) != "" {
+		return true
+	}
+	return strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String()) != ""
+}
+
+func setOpenAIReasoningEffort(reqBody map[string]any, effort string) {
+	if reqBody == nil {
+		return
+	}
+	effort = normalizeOpenAIReasoningEffort(effort)
+	if effort == "" {
+		return
+	}
+	reasoning, _ := reqBody["reasoning"].(map[string]any)
+	if reasoning == nil {
+		reasoning = map[string]any{"summary": "auto"}
+		reqBody["reasoning"] = reasoning
+	}
+	reasoning["effort"] = effort
+}
+
+func normalizeOpenAIResponsesRequestReasoning(req *apicompat.ResponsesRequest) bool {
+	if req == nil || req.Reasoning == nil {
+		return false
+	}
+	normalized := normalizeOpenAIReasoningEffort(req.Reasoning.Effort)
+	if normalized == "" || normalized == req.Reasoning.Effort {
+		return false
+	}
+	req.Reasoning.Effort = normalized
+	return true
+}
+
 func extractOpenAIReasoningEffortFromBody(body []byte, requestedModel string) *string {
 	reasoningEffort := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
 	if reasoningEffort == "" {
@@ -6480,7 +6674,7 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 
 	switch value {
 	case "none", "minimal":
-		return ""
+		return "none"
 	case "low", "medium", "high":
 		return value
 	case "xhigh", "extrahigh":

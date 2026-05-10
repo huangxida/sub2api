@@ -16,6 +16,7 @@ import (
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 type openAIWSClientFrameConn struct {
@@ -97,6 +98,10 @@ func (c *openAIWSPolicyEnforcingFrameConn) Close() error {
 // (account.GetMappedModel + normalizeOpenAIModelForUpstream) so the WS path
 // matches model whitelists identically.
 func openAIWSPassthroughPolicyModelForFrame(account *Account, payload []byte) string {
+	return openAIWSPassthroughPolicyModelForFrameWithSettings(account, payload, OpenAIUnknownModelFallbackSettings{})
+}
+
+func openAIWSPassthroughPolicyModelForFrameWithSettings(account *Account, payload []byte, settings OpenAIUnknownModelFallbackSettings) string {
 	if account == nil || len(payload) == 0 {
 		return ""
 	}
@@ -104,7 +109,46 @@ func openAIWSPassthroughPolicyModelForFrame(account *Account, payload []byte) st
 	if original == "" {
 		return ""
 	}
-	return normalizeOpenAIModelForUpstream(account, account.GetMappedModel(original))
+	return normalizeOpenAIModelForUpstreamWithUnknownFallback(account, account.GetMappedModel(original), settings).Model
+}
+
+func normalizeOpenAIWSPassthroughPayloadForUpstream(
+	account *Account,
+	payload []byte,
+	settings OpenAIUnknownModelFallbackSettings,
+) ([]byte, string, error) {
+	if account == nil || len(payload) == 0 {
+		return payload, "", nil
+	}
+	if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
+		return payload, "", nil
+	}
+	original := strings.TrimSpace(gjson.GetBytes(payload, "model").String())
+	if original == "" {
+		normalized, _, err := normalizeOpenAIReasoningEffortInBody(payload)
+		return normalized, "", err
+	}
+	result := normalizeOpenAIModelForUpstreamWithUnknownFallback(account, account.GetMappedModel(original), settings)
+	updated := payload
+	if result.Model != "" && result.Model != original {
+		var err error
+		updated, err = sjson.SetBytes(updated, "model", result.Model)
+		if err != nil {
+			return payload, "", fmt.Errorf("set ws response.create model: %w", err)
+		}
+	}
+	if result.DerivedReasoningEffort != "" && !hasNonEmptyOpenAIReasoningEffortInBody(updated) {
+		var err error
+		updated, err = sjson.SetBytes(updated, "reasoning.effort", result.DerivedReasoningEffort)
+		if err != nil {
+			return payload, "", fmt.Errorf("set ws response.create reasoning.effort: %w", err)
+		}
+	}
+	normalized, _, err := normalizeOpenAIReasoningEffortInBody(updated)
+	if err != nil {
+		return payload, "", err
+	}
+	return normalized, result.Model, nil
 }
 
 // openAIWSPassthroughPolicyModelFromSessionFrame returns the upstream model
@@ -125,6 +169,10 @@ func openAIWSPassthroughPolicyModelForFrame(account *Account, payload []byte) st
 // the per-frame resolver returns "" and the stale capturedSessionModel falls
 // back to gpt-4o — defeating the gpt-5.5 fast-policy filter.
 func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []byte) string {
+	return openAIWSPassthroughPolicyModelFromSessionFrameWithSettings(account, payload, OpenAIUnknownModelFallbackSettings{})
+}
+
+func openAIWSPassthroughPolicyModelFromSessionFrameWithSettings(account *Account, payload []byte, settings OpenAIUnknownModelFallbackSettings) string {
 	if account == nil || len(payload) == 0 {
 		return ""
 	}
@@ -136,12 +184,41 @@ func openAIWSPassthroughPolicyModelFromSessionFrame(account *Account, payload []
 	if original == "" {
 		return ""
 	}
-	return normalizeOpenAIModelForUpstream(account, account.GetMappedModel(original))
+	return normalizeOpenAIModelForUpstreamWithUnknownFallback(account, account.GetMappedModel(original), settings).Model
+}
+
+func normalizeOpenAIWSPassthroughSessionFrameForUpstream(
+	account *Account,
+	payload []byte,
+	settings OpenAIUnknownModelFallbackSettings,
+) ([]byte, string, error) {
+	if account == nil || len(payload) == 0 {
+		return payload, "", nil
+	}
+	frameType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+	if frameType != "session.update" {
+		return payload, "", nil
+	}
+	original := strings.TrimSpace(gjson.GetBytes(payload, "session.model").String())
+	if original == "" {
+		return payload, "", nil
+	}
+	result := normalizeOpenAIModelForUpstreamWithUnknownFallback(account, account.GetMappedModel(original), settings)
+	if result.Model == "" || result.Model == original {
+		return payload, result.Model, nil
+	}
+	updated, err := sjson.SetBytes(payload, "session.model", result.Model)
+	if err != nil {
+		return payload, "", fmt.Errorf("set ws session.model: %w", err)
+	}
+	return updated, result.Model, nil
 }
 
 type openAIWSPassthroughUsageMeta struct {
 	serviceTier     atomic.Pointer[string]
 	reasoningEffort atomic.Pointer[string]
+	requestModel    atomic.Pointer[string]
+	upstreamModel   atomic.Pointer[string]
 
 	// 仅在 client->upstream filter goroutine 中读写；Load 侧通过上方原子指针同步。
 	sessionRequestModel string
@@ -154,6 +231,7 @@ func newOpenAIWSPassthroughUsageMeta(initialRequestModel string, firstFrame []by
 	if meta.sessionRequestModel == "" {
 		meta.sessionRequestModel = openAIWSPassthroughRequestModelForFrame(firstFrame)
 	}
+	meta.setRequestModel(meta.sessionRequestModel)
 	return meta
 }
 
@@ -163,6 +241,35 @@ func (m *openAIWSPassthroughUsageMeta) initFromFirstFrame(policyOutput []byte) {
 	}
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
 	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, m.sessionRequestModel))
+}
+
+func (m *openAIWSPassthroughUsageMeta) setUpstreamModel(model string) {
+	if m == nil {
+		return
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return
+	}
+	m.upstreamModel.Store(&model)
+}
+
+func (m *openAIWSPassthroughUsageMeta) setRequestModel(model string) {
+	if m == nil {
+		return
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return
+	}
+	m.requestModel.Store(&model)
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func (m *openAIWSPassthroughUsageMeta) updateSessionRequestModel(payload []byte) {
@@ -184,10 +291,21 @@ func (m *openAIWSPassthroughUsageMeta) requestModelForFrame(payload []byte) stri
 	return m.sessionRequestModel
 }
 
+func (m *openAIWSPassthroughUsageMeta) currentRequestModel() string {
+	if m == nil {
+		return ""
+	}
+	if model := strings.TrimSpace(derefString(m.requestModel.Load())); model != "" {
+		return model
+	}
+	return m.sessionRequestModel
+}
+
 func (m *openAIWSPassthroughUsageMeta) updateFromResponseCreate(policyOutput []byte, requestModelForFrame string) {
 	if m == nil {
 		return
 	}
+	m.setRequestModel(requestModelForFrame)
 	m.serviceTier.Store(extractOpenAIServiceTierFromBody(policyOutput))
 	m.reasoningEffort.Store(extractOpenAIReasoningEffortFromBody(policyOutput, requestModelForFrame))
 }
@@ -358,12 +476,22 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// model would miss the default ["gpt-5.5","gpt-5.5*"] whitelist and be
 	// silently passed through, defeating the policy on every frame after
 	// the first.
-	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
+	unknownModelFallbackSettings := s.getOpenAIUnknownModelFallbackSettings(ctx)
+	capturedSessionModel := openAIWSPassthroughPolicyModelForFrameWithSettings(account, firstClientMessage, unknownModelFallbackSettings)
 	initialRequestModel := ""
 	if hooks != nil {
 		initialRequestModel = hooks.InitialRequestModel
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
+	normalizedFirst, firstUpstreamModel, normalizeErr := normalizeOpenAIWSPassthroughPayloadForUpstream(account, firstClientMessage, unknownModelFallbackSettings)
+	if normalizeErr != nil {
+		return fmt.Errorf("normalize first ws frame: %w", normalizeErr)
+	}
+	if firstUpstreamModel != "" {
+		capturedSessionModel = firstUpstreamModel
+	}
+	firstClientMessage = normalizedFirst
+	usageMeta.setUpstreamModel(capturedSessionModel)
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
@@ -385,6 +513,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
+	usageMeta.setUpstreamModel(capturedSessionModel)
 
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
 	// usage 上报：filter
@@ -497,21 +626,38 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			// → 不带 model 的 response.create fallback 到 gpt-4o" 的
 			// 绕过路径。这里只看 session.update 事件中的 session.model
 			// 字段，response.create 自己的 model 仍然由其本帧字段决定。
-			if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
-				capturedSessionModel = updated
-			}
 			usageMeta.updateSessionRequestModel(payload)
 			requestModelForThisFrame := usageMeta.requestModelForFrame(payload)
+			normalizedPayload := payload
+			if next, updated, normalizeErr := normalizeOpenAIWSPassthroughSessionFrameForUpstream(account, normalizedPayload, unknownModelFallbackSettings); normalizeErr != nil {
+				return payload, nil, normalizeErr
+			} else {
+				normalizedPayload = next
+				if updated != "" {
+					capturedSessionModel = updated
+					usageMeta.setUpstreamModel(updated)
+				}
+			}
+			var frameUpstreamModel string
+			if next, updated, normalizeErr := normalizeOpenAIWSPassthroughPayloadForUpstream(account, normalizedPayload, unknownModelFallbackSettings); normalizeErr != nil {
+				return payload, nil, normalizeErr
+			} else {
+				normalizedPayload = next
+				frameUpstreamModel = updated
+				if frameUpstreamModel != "" {
+					usageMeta.setUpstreamModel(frameUpstreamModel)
+				}
+			}
 			// Per-frame model first; if the client omits "model" on a
 			// follow-up frame (legal in Realtime), fall back to the
 			// session-level model captured from the first frame so the
 			// model whitelist still resolves. An empty model would miss
 			// any whitelist and silently fall back to pass.
-			model := openAIWSPassthroughPolicyModelForFrame(account, payload)
+			model := frameUpstreamModel
 			if model == "" {
 				model = capturedSessionModel
 			}
-			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
+			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, normalizedPayload)
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
 			// 的 response.create 帧上更新 usageMeta，使用
 			// filter 处理后的 payload，与首帧 policy-after-extract 语义
@@ -572,7 +718,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						CacheCreationInputTokens: turn.Usage.CacheCreationInputTokens,
 						CacheReadInputTokens:     turn.Usage.CacheReadInputTokens,
 					},
-					Model:               turn.RequestModel,
+					Model:               usageMeta.currentRequestModel(),
+					UpstreamModel:       derefString(usageMeta.upstreamModel.Load()),
 					ServiceTier:         usageMeta.serviceTier.Load(),
 					ReasoningEffort:     usageMeta.reasoningEffort.Load(),
 					Stream:              true,
@@ -629,7 +776,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			CacheCreationInputTokens: relayResult.Usage.CacheCreationInputTokens,
 			CacheReadInputTokens:     relayResult.Usage.CacheReadInputTokens,
 		},
-		Model:               relayResult.RequestModel,
+		Model:               usageMeta.currentRequestModel(),
+		UpstreamModel:       derefString(usageMeta.upstreamModel.Load()),
 		ServiceTier:         usageMeta.serviceTier.Load(),
 		ReasoningEffort:     usageMeta.reasoningEffort.Load(),
 		Stream:              true,

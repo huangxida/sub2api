@@ -80,12 +80,34 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	normalization := normalizeOpenAIModelForUpstreamWithUnknownFallback(
+		account,
+		billingModel,
+		s.getOpenAIUnknownModelFallbackSettings(ctx),
+	)
+	upstreamModel := normalization.Model
+	if reasoningEffort == nil && normalization.DerivedReasoningEffort != "" {
+		reasoningEffort = &normalization.DerivedReasoningEffort
+	}
 
 	// 3. Rewrite model in body (no protocol conversion)
 	upstreamBody := body
 	if upstreamModel != originalModel {
 		upstreamBody = ReplaceModelInBody(body, upstreamModel)
+	}
+	if normalization.DerivedReasoningEffort != "" &&
+		!hasNonEmptyOpenAIReasoningEffortInBody(upstreamBody) {
+		var setErr error
+		upstreamBody, setErr = sjson.SetBytes(upstreamBody, "reasoning_effort", normalization.DerivedReasoningEffort)
+		if setErr != nil {
+			return nil, fmt.Errorf("set derived reasoning_effort: %w", setErr)
+		}
+	}
+	if normalizedBody, effortNormalized, err := normalizeOpenAIReasoningEffortInBody(upstreamBody); err != nil {
+		return nil, err
+	} else if effortNormalized {
+		upstreamBody = normalizedBody
+		reasoningEffort = extractOpenAIReasoningEffortFromBody(upstreamBody, originalModel)
 	}
 
 	// 4. Apply OpenAI fast policy on the CC body
