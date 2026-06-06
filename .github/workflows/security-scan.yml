@@ -35,7 +35,7 @@ jobs:
       - name: Verify Go version
         run: |
           case "$(go version)" in
-            *"go1.26.3"*) ;;
+            *"go1.26.4"*) ;;
             *)
               echo "unexpected Go version: $(go version)"
               exit 1
