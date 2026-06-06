@@ -6819,36 +6819,6 @@ func detectOpenAIPassthroughInstructionsRejectReason(reqModel string, body []byt
 	return ""
 }
 
-func hasOpenAIReasoningEffort(reqBody map[string]any) bool {
-	_, present := getOpenAIReasoningEffortFromReqBody(reqBody)
-	return present
-}
-
-func normalizeOpenAIReasoningEffortInRequestBody(reqBody map[string]any) bool {
-	if reqBody == nil {
-		return false
-	}
-	if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
-		if effort, ok := reasoning["effort"].(string); ok {
-			normalized := normalizeOpenAIReasoningEffort(effort)
-			if normalized == "" || normalized == effort {
-				return false
-			}
-			reasoning["effort"] = normalized
-			return true
-		}
-	}
-	if effort, ok := reqBody["reasoning_effort"].(string); ok {
-		normalized := normalizeOpenAIReasoningEffort(effort)
-		if normalized == "" || normalized == effort {
-			return false
-		}
-		reqBody["reasoning_effort"] = normalized
-		return true
-	}
-	return false
-}
-
 func normalizeOpenAIReasoningEffortInBody(body []byte) ([]byte, bool, error) {
 	if len(body) == 0 {
 		return body, false, nil
@@ -6886,22 +6856,6 @@ func hasNonEmptyOpenAIReasoningEffortInBody(body []byte) bool {
 		return true
 	}
 	return strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String()) != ""
-}
-
-func setOpenAIReasoningEffort(reqBody map[string]any, effort string) {
-	if reqBody == nil {
-		return
-	}
-	effort = normalizeOpenAIReasoningEffort(effort)
-	if effort == "" {
-		return
-	}
-	reasoning, _ := reqBody["reasoning"].(map[string]any)
-	if reasoning == nil {
-		reasoning = map[string]any{"summary": "auto"}
-		reqBody["reasoning"] = reasoning
-	}
-	reasoning["effort"] = effort
 }
 
 func normalizeOpenAIResponsesRequestReasoning(req *apicompat.ResponsesRequest) bool {
