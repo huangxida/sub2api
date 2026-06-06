@@ -59,7 +59,7 @@ func (r *opsRepository) getDashboardOverviewRaw(ctx context.Context, filter *ser
 	}
 
 	latencyCtx, cancelLatency := context.WithTimeout(ctx, opsRawLatencyQueryTimeout)
-	duration, ttft, err := r.queryUsageLatency(latencyCtx, filter, start, end)
+	duration, ttft, _, err := r.queryUsageLatency(latencyCtx, filter, start, end)
 	cancelLatency()
 	if err != nil {
 		if isQueryTimeoutErr(err) {
@@ -164,6 +164,7 @@ func (r *opsRepository) getDashboardOverviewRaw(ctx context.Context, filter *ser
 
 type opsDashboardPartial struct {
 	successCount         int64
+	ttftSampleCount      int64
 	errorCountTotal      int64
 	businessLimitedCount int64
 	errorCountSLA        int64
@@ -248,10 +249,12 @@ func (r *opsRepository) getDashboardOverviewPreaggregated(ctx context.Context, f
 		{weight: head.successCount, p: head.duration},
 		{weight: tail.successCount, p: tail.duration},
 	})
+	// TTFT segments are weighted by the streaming sample count (rows that
+	// actually recorded first_token_ms), not the total success count.
 	ttft := combineApproxPercentiles([]opsPercentileSegment{
-		{weight: preagg.successCount, p: preagg.ttft},
-		{weight: head.successCount, p: head.ttft},
-		{weight: tail.successCount, p: tail.ttft},
+		{weight: preagg.ttftSampleCount, p: preagg.ttft},
+		{weight: head.ttftSampleCount, p: head.ttft},
+		{weight: tail.ttftSampleCount, p: tail.ttft},
 	})
 
 	windowSeconds := end.Sub(start).Seconds()
@@ -346,6 +349,7 @@ type opsHourlyMetricsRow struct {
 	bucketStart time.Time
 
 	successCount         int64
+	ttftSampleCount      int64
 	errorCountTotal      int64
 	businessLimitedCount int64
 	errorCountSLA        int64
@@ -430,7 +434,8 @@ SELECT
   ttft_p95_ms,
   ttft_p99_ms,
   ttft_avg_ms,
-  ttft_max_ms
+  ttft_max_ms,
+  ttft_sample_count
 FROM ops_metrics_hourly
 WHERE ` + where + `
 ORDER BY bucket_start ASC`
@@ -466,6 +471,7 @@ ORDER BY bucket_start ASC`
 			&row.ttftP99,
 			&row.ttftAvg,
 			&row.ttftMax,
+			&row.ttftSampleCount,
 		); err != nil {
 			return nil, err
 		}
@@ -512,6 +518,7 @@ func aggregateHourlyRows(rows []opsHourlyMetricsRow) opsDashboardPartial {
 
 	for _, row := range rows {
 		out.successCount += row.successCount
+		out.ttftSampleCount += row.ttftSampleCount
 		out.errorCountTotal += row.errorCountTotal
 		out.businessLimitedCount += row.businessLimitedCount
 		out.errorCountSLA += row.errorCountSLA
@@ -535,17 +542,23 @@ func aggregateHourlyRows(rows []opsHourlyMetricsRow) opsDashboardPartial {
 				avgSum += row.durationAvg.Float64 * float64(row.successCount)
 				avgW += row.successCount
 			}
+		}
+
+		// TTFT is weighted by ttftSampleCount (streaming rows only), NOT
+		// successCount: first_token_ms is recorded only for streaming requests,
+		// so weighting by total successes dilutes the merged TTFT figures.
+		if row.ttftSampleCount > 0 {
 			if row.ttftP50.Valid {
-				ttftP50Sum += float64(row.ttftP50.Int64) * float64(row.successCount)
-				ttftP50W += row.successCount
+				ttftP50Sum += float64(row.ttftP50.Int64) * float64(row.ttftSampleCount)
+				ttftP50W += row.ttftSampleCount
 			}
 			if row.ttftP90.Valid {
-				ttftP90Sum += float64(row.ttftP90.Int64) * float64(row.successCount)
-				ttftP90W += row.successCount
+				ttftP90Sum += float64(row.ttftP90.Int64) * float64(row.ttftSampleCount)
+				ttftP90W += row.ttftSampleCount
 			}
 			if row.ttftAvg.Valid {
-				ttftAvgSum += row.ttftAvg.Float64 * float64(row.successCount)
-				ttftAvgW += row.successCount
+				ttftAvgSum += row.ttftAvg.Float64 * float64(row.ttftSampleCount)
+				ttftAvgW += row.ttftSampleCount
 			}
 		}
 
@@ -632,12 +645,13 @@ func (r *opsRepository) queryRawPartial(ctx context.Context, filter *service.Ops
 	}
 
 	latencyCtx, cancelLatency := context.WithTimeout(ctx, opsRawLatencyQueryTimeout)
-	duration, ttft, err := r.queryUsageLatency(latencyCtx, filter, start, end)
+	duration, ttft, ttftSampleCount, err := r.queryUsageLatency(latencyCtx, filter, start, end)
 	cancelLatency()
 	if err != nil {
 		if isQueryTimeoutErr(err) {
 			duration = service.OpsPercentiles{}
 			ttft = service.OpsPercentiles{}
+			ttftSampleCount = 0
 		} else {
 			return nil, err
 		}
@@ -650,6 +664,7 @@ func (r *opsRepository) queryRawPartial(ctx context.Context, filter *service.Ops
 
 	return &opsDashboardPartial{
 		successCount:                 successCount,
+		ttftSampleCount:              ttftSampleCount,
 		errorCountTotal:              errorTotal,
 		businessLimitedCount:         businessLimited,
 		errorCountSLA:                errorCountSLA,
@@ -829,7 +844,7 @@ FROM usage_logs ul
 	return summary, nil
 }
 
-func (r *opsRepository) queryUsageLatency(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (duration service.OpsPercentiles, ttft service.OpsPercentiles, err error) {
+func (r *opsRepository) queryUsageLatency(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (duration service.OpsPercentiles, ttft service.OpsPercentiles, ttftSampleCount int64, err error) {
 	join, where, args, _ := buildUsageWhere(filter, start, end, 1)
 	q := `
 SELECT
@@ -844,7 +859,8 @@ SELECT
   percentile_cont(0.95) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p95,
   percentile_cont(0.99) WITHIN GROUP (ORDER BY first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_p99,
   AVG(first_token_ms) FILTER (WHERE first_token_ms IS NOT NULL) AS ttft_avg,
-  MAX(first_token_ms) AS ttft_max
+  MAX(first_token_ms) AS ttft_max,
+  COUNT(first_token_ms) AS ttft_sample_count
 FROM usage_logs ul
 ` + join + `
 ` + where
@@ -855,11 +871,12 @@ FROM usage_logs ul
 	var tP50, tP90, tP95, tP99 sql.NullFloat64
 	var tAvg sql.NullFloat64
 	var tMax sql.NullInt64
+	var tCount int64
 	if err := r.db.QueryRowContext(ctx, q, args...).Scan(
 		&dP50, &dP90, &dP95, &dP99, &dAvg, &dMax,
-		&tP50, &tP90, &tP95, &tP99, &tAvg, &tMax,
+		&tP50, &tP90, &tP95, &tP99, &tAvg, &tMax, &tCount,
 	); err != nil {
-		return service.OpsPercentiles{}, service.OpsPercentiles{}, err
+		return service.OpsPercentiles{}, service.OpsPercentiles{}, 0, err
 	}
 
 	duration.P50 = floatToIntPtr(dP50)
@@ -882,7 +899,7 @@ FROM usage_logs ul
 		ttft.Max = &v
 	}
 
-	return duration, ttft, nil
+	return duration, ttft, tCount, nil
 }
 
 func (r *opsRepository) queryErrorCounts(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (
