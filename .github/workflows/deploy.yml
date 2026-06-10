@@ -118,7 +118,19 @@ jobs:
         shell: bash
         env:
           SUB2API_DEPLOY_SSH_KEY: ${{ secrets.SUB2API_DEPLOY_SSH_KEY }}
+          SUB2API_DEPLOY_HOST: ${{ secrets.SUB2API_DEPLOY_HOST }}
+          SUB2API_DEPLOY_PORT: ${{ secrets.SUB2API_DEPLOY_PORT }}
         run: |
+          if [[ -z "$SUB2API_DEPLOY_HOST" ]]; then
+            echo "SUB2API_DEPLOY_HOST secret is required." >&2
+            exit 1
+          fi
+
+          if [[ -z "$SUB2API_DEPLOY_PORT" ]]; then
+            echo "SUB2API_DEPLOY_PORT secret is required." >&2
+            exit 1
+          fi
+
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           install -m 600 /dev/null ~/.ssh/deploy_sub2api
@@ -126,8 +138,8 @@ jobs:
           chmod 600 ~/.ssh/deploy_sub2api
           cat > ~/.ssh/config <<'SSHCONF'
           Host production
-              HostName 107.140.5.5
-              Port 55222
+              HostName __SUB2API_DEPLOY_HOST__
+              Port __SUB2API_DEPLOY_PORT__
               User deploy-sub2api
               IdentityFile ~/.ssh/deploy_sub2api
               IdentitiesOnly yes
@@ -136,6 +148,7 @@ jobs:
               UserKnownHostsFile ~/.ssh/known_hosts
               ConnectTimeout 10
           SSHCONF
+          sed -i "s|__SUB2API_DEPLOY_HOST__|${SUB2API_DEPLOY_HOST}|g; s|__SUB2API_DEPLOY_PORT__|${SUB2API_DEPLOY_PORT}|g" ~/.ssh/config
           chmod 600 ~/.ssh/config
 
       - name: Deploy on $HOST
