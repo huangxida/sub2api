@@ -2,6 +2,16 @@ name: Build & Deploy sub2api
 
 on:
   workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "Version tag to build/deploy, for example v1.20.0. Leave empty to use the latest v* tag."
+        required: false
+        type: string
+      publish_release:
+        description: "Create or update the GitHub Release for the resolved version tag."
+        required: false
+        default: true
+        type: boolean
   push:
     tags:
       - "v*"
@@ -17,7 +27,6 @@ permissions:
 env:
   HOST: production
   GHCR_IMAGE: ghcr.io/huangxida/sub2api
-  IMAGE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
 
 jobs:
   build-deploy:
@@ -26,10 +35,60 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      image_version: ${{ steps.version.outputs.image_version }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
+      target_sha: ${{ steps.version.outputs.target_sha }}
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --force --tags origin
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            image_version="${GITHUB_REF_NAME}"
+            release_tag="${GITHUB_REF_NAME}"
+          else
+            requested_tag="${{ inputs.version_tag || '' }}"
+            if [[ -n "$requested_tag" ]]; then
+              if ! git rev-parse --verify --quiet "${requested_tag}^{commit}" >/dev/null; then
+                echo "Requested tag '${requested_tag}' does not exist." >&2
+                exit 1
+              fi
+              image_version="$requested_tag"
+              release_tag="$requested_tag"
+            else
+              latest_tag="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+              if [[ -n "$latest_tag" ]]; then
+                image_version="$latest_tag"
+                release_tag="$latest_tag"
+              else
+                image_version="$(git rev-parse --short=12 HEAD)"
+                release_tag=""
+              fi
+            fi
+          fi
+
+          target_sha="$(git rev-parse HEAD)"
+          short_sha="$(git rev-parse --short HEAD)"
+
+          {
+            echo "image_version=${image_version}"
+            echo "release_tag=${release_tag}"
+            echo "target_sha=${target_sha}"
+            echo "short_sha=${short_sha}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Image version: ${image_version}"
+          echo "Release tag: ${release_tag:-<none>}"
+          echo "Target SHA: ${target_sha}"
 
       - name: Login to GHCR
         shell: bash
@@ -40,7 +99,8 @@ jobs:
         shell: bash
         run: |
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          SHORT_SHA="$(git rev-parse --short HEAD)"
+          IMAGE_VERSION="${{ steps.version.outputs.image_version }}"
+          SHORT_SHA="${{ steps.version.outputs.short_sha }}"
 
           docker buildx build \
             --platform linux/amd64 \
@@ -81,10 +141,16 @@ jobs:
       - name: Deploy on $HOST
         shell: bash
         run: |
-          ssh -o ConnectTimeout=15 "$HOST" sudo /usr/local/sbin/deploy-sub2api "$IMAGE_VERSION"
+          ssh -o ConnectTimeout=15 "$HOST" sudo /usr/local/sbin/deploy-sub2api "${{ steps.version.outputs.image_version }}"
 
   release:
-    if: success() && startsWith(github.ref, 'refs/tags/')
+    if: >-
+      success() &&
+      needs.build-deploy.outputs.release_tag != '' &&
+      (
+        startsWith(github.ref, 'refs/tags/') ||
+        (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+      )
     needs: build-deploy
     runs-on: ubuntu-latest
     permissions:
@@ -101,8 +167,8 @@ jobs:
       - name: Generate release notes
         shell: bash
         run: |
-          TAG_NAME="${GITHUB_REF_NAME}"
-          TARGET_SHA="${GITHUB_SHA}"
+          TAG_NAME="${{ needs.build-deploy.outputs.release_tag }}"
+          TARGET_SHA="${{ needs.build-deploy.outputs.target_sha }}"
           prev_tag="$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || true)"
           {
             echo "## Release ${TAG_NAME}"
@@ -121,9 +187,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.ref_name }}
-          target_commitish: ${{ github.sha }}
-          name: ${{ github.ref_name }}
+          tag_name: ${{ needs.build-deploy.outputs.release_tag }}
+          target_commitish: ${{ needs.build-deploy.outputs.target_sha }}
+          name: ${{ needs.build-deploy.outputs.release_tag }}
           body_path: release_notes.md
           draft: false
           prerelease: false
