@@ -114,23 +114,43 @@ jobs:
             --push \
             .
 
-      - name: Configure SSH
+      - name: Resolve deploy availability
+        id: deploy_availability
         shell: bash
         env:
           SUB2API_DEPLOY_SSH_KEY: ${{ secrets.SUB2API_DEPLOY_SSH_KEY }}
           SUB2API_DEPLOY_HOST: ${{ secrets.SUB2API_DEPLOY_HOST }}
           SUB2API_DEPLOY_PORT: ${{ secrets.SUB2API_DEPLOY_PORT }}
         run: |
+          set -euo pipefail
+
+          missing=()
+          if [[ -z "$SUB2API_DEPLOY_SSH_KEY" ]]; then
+            missing+=("SUB2API_DEPLOY_SSH_KEY")
+          fi
           if [[ -z "$SUB2API_DEPLOY_HOST" ]]; then
-            echo "SUB2API_DEPLOY_HOST secret is required." >&2
-            exit 1
+            missing+=("SUB2API_DEPLOY_HOST")
           fi
-
           if [[ -z "$SUB2API_DEPLOY_PORT" ]]; then
-            echo "SUB2API_DEPLOY_PORT secret is required." >&2
-            exit 1
+            missing+=("SUB2API_DEPLOY_PORT")
           fi
 
+          if (( ${#missing[@]} > 0 )); then
+            echo "deploy_enabled=false" >> "$GITHUB_OUTPUT"
+            printf 'Deployment skipped because required secret(s) are missing: %s\n' "${missing[*]}"
+          else
+            echo "deploy_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Deployment enabled."
+          fi
+
+      - name: Configure SSH
+        if: steps.deploy_availability.outputs.deploy_enabled == 'true'
+        shell: bash
+        env:
+          SUB2API_DEPLOY_SSH_KEY: ${{ secrets.SUB2API_DEPLOY_SSH_KEY }}
+          SUB2API_DEPLOY_HOST: ${{ secrets.SUB2API_DEPLOY_HOST }}
+          SUB2API_DEPLOY_PORT: ${{ secrets.SUB2API_DEPLOY_PORT }}
+        run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           install -m 600 /dev/null ~/.ssh/deploy_sub2api
@@ -152,6 +172,7 @@ jobs:
           chmod 600 ~/.ssh/config
 
       - name: Deploy on $HOST
+        if: steps.deploy_availability.outputs.deploy_enabled == 'true'
         shell: bash
         run: |
           ssh -o ConnectTimeout=15 "$HOST" sudo /usr/local/sbin/deploy-sub2api "${{ steps.version.outputs.image_version }}"
