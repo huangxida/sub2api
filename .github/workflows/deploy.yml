@@ -55,13 +55,13 @@ jobs:
 
       - name: Configure SSH
         shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
           install -m 600 /dev/null ~/.ssh/deploy_prod
-          cat > ~/.ssh/deploy_prod <<'KEY'
-          ${{ secrets.DEPLOY_SSH_KEY }}
-          KEY
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_prod
           chmod 600 ~/.ssh/deploy_prod
           cat > ~/.ssh/config <<'SSHCONF'
           Host ca1
