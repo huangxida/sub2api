@@ -1,4 +1,4 @@
-name: Build & Deploy sub2api to ca1
+name: Build & Deploy sub2api
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ permissions:
   packages: write
 
 env:
-  HOST: ca1
+  HOST: production
   GHCR_IMAGE: ghcr.io/huangxida/sub2api
   IMAGE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
 
@@ -57,19 +57,19 @@ jobs:
       - name: Configure SSH
         shell: bash
         env:
-          CA1_DEPLOY_SSH_KEY: ${{ secrets.CA1_DEPLOY_SSH_KEY }}
+          SUB2API_DEPLOY_SSH_KEY: ${{ secrets.SUB2API_DEPLOY_SSH_KEY }}
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          install -m 600 /dev/null ~/.ssh/deploy_ca1_sub2api
-          printf '%s\n' "$CA1_DEPLOY_SSH_KEY" > ~/.ssh/deploy_ca1_sub2api
-          chmod 600 ~/.ssh/deploy_ca1_sub2api
+          install -m 600 /dev/null ~/.ssh/deploy_sub2api
+          printf '%s\n' "$SUB2API_DEPLOY_SSH_KEY" > ~/.ssh/deploy_sub2api
+          chmod 600 ~/.ssh/deploy_sub2api
           cat > ~/.ssh/config <<'SSHCONF'
-          Host ca1
+          Host production
               HostName 107.140.5.5
               Port 55222
               User deploy-sub2api
-              IdentityFile ~/.ssh/deploy_ca1_sub2api
+              IdentityFile ~/.ssh/deploy_sub2api
               IdentitiesOnly yes
               ServerAliveInterval 60
               StrictHostKeyChecking accept-new
