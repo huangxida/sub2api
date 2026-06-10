@@ -12,64 +12,89 @@ concurrency:
 
 permissions:
   contents: write
+  packages: write
 
 env:
   HOST: los3
   IMAGE: xidahuang/sub2api
-  TARBALL: /tmp/sub2api-image.tar.gz
-  REMOTE_TARBALL: /tmp/sub2api-incoming.tar.gz
+  GHCR_IMAGE: ghcr.io/huangxida/sub2api
   REMOTE_COMPOSE_DIR: /root/sub2api
   IMAGE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
 
 jobs:
   build-deploy:
-    runs-on: [self-hosted, ca1]
+    runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
-      - name: Build image on ca1
+      - name: Login to GHCR
+        shell: bash
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push image
         shell: bash
         run: |
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           SHORT_SHA="$(git rev-parse --short HEAD)"
 
-          docker build \
+          docker buildx build \
+            --platform linux/amd64 \
             --build-arg VERSION="${IMAGE_VERSION}" \
             --build-arg COMMIT="${SHORT_SHA}" \
             --build-arg DATE="${BUILD_DATE}" \
             --build-arg GOPROXY="https://goproxy.cn,direct" \
             --build-arg GOSUMDB="sum.golang.google.cn" \
-            -t "$IMAGE:latest" \
-            -t "$IMAGE:${IMAGE_VERSION}" \
+            -t "$GHCR_IMAGE:latest" \
+            -t "$GHCR_IMAGE:${IMAGE_VERSION}" \
+            --push \
             .
 
-          docker images "$IMAGE" | awk 'NR <= 5'
-
-      - name: Save image to tarball
+      - name: Configure SSH
         shell: bash
         run: |
-          rm -f "$TARBALL"
-          docker save "$IMAGE:latest" | gzip -1 > "$TARBALL"
-          ls -lh "$TARBALL"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          install -m 600 /dev/null ~/.ssh/deploy_prod
+          cat > ~/.ssh/deploy_prod <<'KEY'
+          ${{ secrets.DEPLOY_SSH_KEY }}
+          KEY
+          chmod 600 ~/.ssh/deploy_prod
+          cat > ~/.ssh/config <<'SSHCONF'
+          Host los3
+              HostName 47.88.27.81
+              Port 46222
+              User root
+              IdentityFile ~/.ssh/deploy_prod
+              IdentitiesOnly yes
+              ServerAliveInterval 60
+              StrictHostKeyChecking accept-new
+              UserKnownHostsFile ~/.ssh/known_hosts
+              ConnectTimeout 10
+          SSHCONF
+          chmod 600 ~/.ssh/config
 
-      - name: Transfer to $HOST
+      - name: Pull & restart on $HOST
         shell: bash
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
-          scp -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "$TARBALL" "$HOST:$REMOTE_TARBALL"
-
-      - name: Load & restart on $HOST
-        shell: bash
-        run: |
-          ssh -o ConnectTimeout=15 "$HOST" "bash -s" <<'REMOTE'
+          ssh -o ConnectTimeout=15 "$HOST" \
+            "GHCR_USERNAME='$GHCR_USERNAME' GHCR_TOKEN='$GHCR_TOKEN' GHCR_IMAGE='$GHCR_IMAGE' IMAGE='$IMAGE' IMAGE_VERSION='$IMAGE_VERSION' bash -s" <<'REMOTE'
           set -euo pipefail
-          trap 'rm -f "/tmp/sub2api-incoming.tar.gz"' EXIT
           cd "/root/sub2api"
 
-          echo "[los3] loading image..."
-          docker load < "/tmp/sub2api-incoming.tar.gz"
+          echo "[los3] logging in to GHCR..."
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
+          echo "[los3] pulling image..."
+          docker pull "$GHCR_IMAGE:$IMAGE_VERSION"
+          docker tag "$GHCR_IMAGE:$IMAGE_VERSION" "$IMAGE:latest"
+          docker tag "$GHCR_IMAGE:$IMAGE_VERSION" "$IMAGE:$IMAGE_VERSION"
 
           echo "[los3] compose up -d --no-build..."
           docker compose up -d --no-build
@@ -93,21 +118,6 @@ jobs:
           echo "[los3] status:"
           docker ps --filter name=sub2api --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
           REMOTE
-
-      - name: Cleanup tar on ca1
-        if: always()
-        shell: bash
-        run: rm -f "$TARBALL"
-
-      - name: Prune old image tags on ca1 (keep latest + 3 recent non-latest tags)
-        if: success()
-        shell: bash
-        run: |
-          docker images "$IMAGE" --format '{{.Tag}} {{.CreatedAt}}' \
-            | awk '$1 != "latest" { print }' \
-            | sort -k2 -r \
-            | awk 'NR>3 {print $1}' \
-            | xargs -r -I{} docker rmi "$IMAGE:{}" 2>/dev/null || true
 
       - name: Fetch tags for release notes
         if: success() && startsWith(github.ref, 'refs/tags/')
