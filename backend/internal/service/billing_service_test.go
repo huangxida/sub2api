@@ -178,6 +178,71 @@ func TestGetModelPricing_OpenAIGPT54MiniFallback(t *testing.T) {
 	require.Zero(t, pricing.LongContextInputThreshold)
 }
 
+func TestGetModelPricing_MiniMaxFallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	tests := []struct {
+		name                string
+		model               string
+		inputPricePerToken  float64
+		outputPricePerToken float64
+		cacheReadPrice      float64
+		cacheCreationPrice  float64
+	}{
+		{
+			name:                "m2.7 highspeed",
+			model:               "MiniMax-M2.7-highspeed",
+			inputPricePerToken:  0.6e-6,
+			outputPricePerToken: 2.4e-6,
+			cacheReadPrice:      0.06e-6,
+			cacheCreationPrice:  0.375e-6,
+		},
+		{
+			name:                "m2.7 standard",
+			model:               "MiniMax-M2.7",
+			inputPricePerToken:  0.3e-6,
+			outputPricePerToken: 1.2e-6,
+			cacheReadPrice:      0.06e-6,
+			cacheCreationPrice:  0.375e-6,
+		},
+		{
+			name:                "m2.5 highspeed",
+			model:               "MiniMax-M2.5-highspeed",
+			inputPricePerToken:  0.6e-6,
+			outputPricePerToken: 2.4e-6,
+			cacheReadPrice:      0.03e-6,
+			cacheCreationPrice:  0.375e-6,
+		},
+		{
+			name:                "m2.5 standard",
+			model:               "MiniMax-M2.5",
+			inputPricePerToken:  0.3e-6,
+			outputPricePerToken: 1.2e-6,
+			cacheReadPrice:      0.03e-6,
+			cacheCreationPrice:  0.375e-6,
+		},
+		{
+			name:                "m2-her",
+			model:               "M2-her",
+			inputPricePerToken:  0.3e-6,
+			outputPricePerToken: 1.2e-6,
+			cacheReadPrice:      0,
+			cacheCreationPrice:  0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(tt.model)
+			require.NoError(t, err)
+			require.InDelta(t, tt.inputPricePerToken, pricing.InputPricePerToken, 1e-12)
+			require.InDelta(t, tt.outputPricePerToken, pricing.OutputPricePerToken, 1e-12)
+			require.InDelta(t, tt.cacheReadPrice, pricing.CacheReadPricePerToken, 1e-12)
+			require.InDelta(t, tt.cacheCreationPrice, pricing.CacheCreationPricePerToken, 1e-12)
+		})
+	}
+}
+
 func TestCalculateCost_OpenAIGPT54LongContextAppliesWholeSessionMultipliers(t *testing.T) {
 	svc := newTestBillingService()
 
@@ -197,13 +262,73 @@ func TestCalculateCost_OpenAIGPT54LongContextAppliesWholeSessionMultipliers(t *t
 	require.InDelta(t, expectedInput+expectedOutput, cost.ActualCost, 1e-10)
 }
 
-// 回归测试 #2293：长上下文计费触发时，cache_read_tokens 也应应用 LongContextInputMultiplier。
-// 修复前：CacheReadCost = tokens * 0.25e-6 （漏乘倍率，少计费用）。
-// 修复后：CacheReadCost = tokens * 0.25e-6 * LongContextInputMultiplier(=2.0)。
+func TestCalculateCost_MiniMaxOfficialPricing(t *testing.T) {
+	svc := newTestBillingService()
+
+	tests := []struct {
+		name                  string
+		model                 string
+		expectedInputPrice    float64
+		expectedOutputPrice   float64
+		expectedCacheRead     float64
+		expectedCacheCreation float64
+	}{
+		{
+			name:                  "m2.7 highspeed",
+			model:                 "MiniMax-M2.7-highspeed",
+			expectedInputPrice:    0.6e-6,
+			expectedOutputPrice:   2.4e-6,
+			expectedCacheRead:     0.06e-6,
+			expectedCacheCreation: 0.375e-6,
+		},
+		{
+			name:                  "m2.5 standard",
+			model:                 "MiniMax-M2.5",
+			expectedInputPrice:    0.3e-6,
+			expectedOutputPrice:   1.2e-6,
+			expectedCacheRead:     0.03e-6,
+			expectedCacheCreation: 0.375e-6,
+		},
+		{
+			name:                  "m2-her no caching",
+			model:                 "M2-her",
+			expectedInputPrice:    0.3e-6,
+			expectedOutputPrice:   1.2e-6,
+			expectedCacheRead:     0,
+			expectedCacheCreation: 0,
+		},
+	}
+
+	tokens := UsageTokens{
+		InputTokens:         1000,
+		OutputTokens:        500,
+		CacheCreationTokens: 2000,
+		CacheReadTokens:     3000,
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cost, err := svc.CalculateCost(tt.model, tokens, 1.0)
+			require.NoError(t, err)
+
+			expectedInput := float64(tokens.InputTokens) * tt.expectedInputPrice
+			expectedOutput := float64(tokens.OutputTokens) * tt.expectedOutputPrice
+			expectedCacheCreation := float64(tokens.CacheCreationTokens) * tt.expectedCacheCreation
+			expectedCacheRead := float64(tokens.CacheReadTokens) * tt.expectedCacheRead
+
+			require.InDelta(t, expectedInput, cost.InputCost, 1e-12)
+			require.InDelta(t, expectedOutput, cost.OutputCost, 1e-12)
+			require.InDelta(t, expectedCacheCreation, cost.CacheCreationCost, 1e-12)
+			require.InDelta(t, expectedCacheRead, cost.CacheReadCost, 1e-12)
+			require.InDelta(t, expectedInput+expectedOutput+expectedCacheCreation+expectedCacheRead, cost.TotalCost, 1e-12)
+			require.InDelta(t, cost.TotalCost, cost.ActualCost, 1e-12)
+		})
+	}
+}
+
 func TestCalculateCost_OpenAIGPT54LongContextAppliesMultiplierToCacheRead(t *testing.T) {
 	svc := newTestBillingService()
 
-	// InputTokens + CacheReadTokens = 1000 + 300000 = 301000 > 272000 阈值
 	tokens := UsageTokens{
 		InputTokens:     1000,
 		CacheReadTokens: 300000,
@@ -219,19 +344,16 @@ func TestCalculateCost_OpenAIGPT54LongContextAppliesMultiplierToCacheRead(t *tes
 
 	require.InDelta(t, expectedInput, cost.InputCost, 1e-10)
 	require.InDelta(t, expectedOutput, cost.OutputCost, 1e-10)
-	require.InDelta(t, expectedCacheRead, cost.CacheReadCost, 1e-10,
-		"cache_read_cost should be scaled by LongContextInputMultiplier when long-context pricing applies (issue #2293)")
+	require.InDelta(t, expectedCacheRead, cost.CacheReadCost, 1e-10)
 
 	expectedTotal := expectedInput + expectedOutput + expectedCacheRead
 	require.InDelta(t, expectedTotal, cost.TotalCost, 1e-10)
 	require.InDelta(t, expectedTotal, cost.ActualCost, 1e-10)
 }
 
-// 阴性测试：未触发长上下文时，cache_read_price 不应被错误地乘以倍率。
 func TestCalculateCost_OpenAIGPT54NoLongContextKeepsCacheReadAtBasePrice(t *testing.T) {
 	svc := newTestBillingService()
 
-	// InputTokens + CacheReadTokens = 1000 + 100000 = 101000 < 272000 阈值，不触发长上下文
 	tokens := UsageTokens{
 		InputTokens:     1000,
 		CacheReadTokens: 100000,
@@ -242,18 +364,12 @@ func TestCalculateCost_OpenAIGPT54NoLongContextKeepsCacheReadAtBasePrice(t *test
 	require.NoError(t, err)
 
 	expectedCacheRead := float64(tokens.CacheReadTokens) * 0.25e-6
-	require.InDelta(t, expectedCacheRead, cost.CacheReadCost, 1e-10,
-		"cache_read_cost should remain at base price when below long-context threshold")
+	require.InDelta(t, expectedCacheRead, cost.CacheReadCost, 1e-10)
 }
 
-// 回归测试 #2816 follow-up：长上下文计费触发时，cache_creation_tokens 也应应用
-// LongContextInputMultiplier。computeCacheCreationCost 直接读取 pricing.* 价格，
-// 不经过 computeTokenBreakdown 内的 inputPrice / cacheReadPrice 倍率修改，因此
-// 修复前 cache_creation 部分会按基础价计算，少计费用约 50%（默认倍率 2.0）。
 func TestCalculateCost_OpenAIGPT54LongContextAppliesMultiplierToCacheCreation(t *testing.T) {
 	svc := newTestBillingService()
 
-	// InputTokens + CacheReadTokens = 1000 + 300000 = 301000 > 272000 阈值
 	tokens := UsageTokens{
 		InputTokens:         1000,
 		CacheReadTokens:     300000,
@@ -264,17 +380,13 @@ func TestCalculateCost_OpenAIGPT54LongContextAppliesMultiplierToCacheCreation(t 
 	cost, err := svc.CalculateCost("gpt-5.4-2026-03-05", tokens, 1.0)
 	require.NoError(t, err)
 
-	// gpt-5.4 fallback: CacheCreationPricePerToken = 2.5e-6, LongContextInputMultiplier = 2.0
 	expectedCacheCreation := float64(tokens.CacheCreationTokens) * 2.5e-6 * 2.0
-	require.InDelta(t, expectedCacheCreation, cost.CacheCreationCost, 1e-10,
-		"cache_creation_cost should be scaled by LongContextInputMultiplier when long-context pricing applies")
+	require.InDelta(t, expectedCacheCreation, cost.CacheCreationCost, 1e-10)
 }
 
-// 阴性测试：未触发长上下文时，cache_creation_price 不应被错误地乘以倍率。
 func TestCalculateCost_OpenAIGPT54NoLongContextKeepsCacheCreationAtBasePrice(t *testing.T) {
 	svc := newTestBillingService()
 
-	// InputTokens + CacheReadTokens = 1000 + 100000 = 101000 < 272000 阈值，不触发长上下文
 	tokens := UsageTokens{
 		InputTokens:         1000,
 		CacheReadTokens:     100000,
@@ -286,13 +398,9 @@ func TestCalculateCost_OpenAIGPT54NoLongContextKeepsCacheCreationAtBasePrice(t *
 	require.NoError(t, err)
 
 	expectedCacheCreation := float64(tokens.CacheCreationTokens) * 2.5e-6
-	require.InDelta(t, expectedCacheCreation, cost.CacheCreationCost, 1e-10,
-		"cache_creation_cost should remain at base price when below long-context threshold")
+	require.InDelta(t, expectedCacheCreation, cost.CacheCreationCost, 1e-10)
 }
 
-// 覆盖 5m / 1h ephemeral 分类计费路径：长上下文触发时两档价格都应被倍率缩放。
-// 使用手工构造的 pricing（参考 TestCalculateCost_SupportsCacheBreakdown 的写法）
-// 以便同时控制 SupportsCacheBreakdown + 长上下文阈值。
 func TestCalculateCost_LongContextAppliesMultiplierToCacheCreation5mAnd1h(t *testing.T) {
 	svc := &BillingService{
 		cfg: &config.Config{},
@@ -311,7 +419,6 @@ func TestCalculateCost_LongContextAppliesMultiplierToCacheCreation5mAnd1h(t *tes
 		},
 	}
 
-	// InputTokens + CacheReadTokens = 1000 + 300000 = 301000 > 272000 阈值
 	tokens := UsageTokens{
 		InputTokens:           1000,
 		CacheReadTokens:       300000,
@@ -325,8 +432,7 @@ func TestCalculateCost_LongContextAppliesMultiplierToCacheCreation5mAnd1h(t *tes
 
 	expected5m := float64(tokens.CacheCreation5mTokens) * 4e-6 * 2.0
 	expected1h := float64(tokens.CacheCreation1hTokens) * 5e-6 * 2.0
-	require.InDelta(t, expected5m+expected1h, cost.CacheCreationCost, 1e-10,
-		"both 5m and 1h cache_creation prices should be scaled by LongContextInputMultiplier")
+	require.InDelta(t, expected5m+expected1h, cost.CacheCreationCost, 1e-10)
 }
 
 func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
@@ -344,6 +450,11 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{name: "claude generic model fallback sonnet", model: "claude-foo-bar", expectedInput: 3e-6},
 		{name: "gemini explicit fallback", model: "gemini-3-1-pro", expectedInput: 2e-6},
 		{name: "gemini unknown no fallback", model: "gemini-2.0-pro", expectNilPricing: true},
+		{name: "minimax m2.7 highspeed", model: "minimax-m2.7-highspeed", expectedInput: 0.6e-6},
+		{name: "minimax m2.7 standard", model: "minimax-m2.7", expectedInput: 0.3e-6},
+		{name: "minimax m2.5 highspeed", model: "minimax-m2.5-highspeed", expectedInput: 0.6e-6},
+		{name: "minimax m2.5 standard", model: "minimax-m2.5", expectedInput: 0.3e-6},
+		{name: "m2-her", model: "m2-her", expectedInput: 0.3e-6},
 		{name: "openai gpt5.4", model: "gpt-5.4", expectedInput: 2.5e-6},
 		{name: "openai gpt5.4 mini", model: "gpt-5.4-mini", expectedInput: 7.5e-7},
 		{name: "openai gpt5.3 codex", model: "gpt-5.3-codex", expectedInput: 1.5e-6},

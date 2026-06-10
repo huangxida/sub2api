@@ -496,6 +496,8 @@ export interface OpenAIMessagesDispatchModelConfig {
   sonnet_mapped_model?: string
   haiku_mapped_model?: string
   exact_model_mappings?: Record<string, string>
+  forced_reasoning_effort?: string
+  forced_fast_mode?: boolean
 }
 
 export interface Group {
@@ -1296,6 +1298,30 @@ export interface AdminUsageLog extends UsageLog {
   account?: UsageLogAccountSummary
 }
 
+export interface UsageDetailPayload {
+  kind: string
+  content_type?: string | null
+  size_bytes: number
+  is_json: boolean
+  complete?: boolean | null
+  body?: string | null
+  frames?: string[]
+}
+
+export interface AdminUsageDetailResponse {
+  usage_log_id: number
+  has_detail: boolean
+  request_id: string
+  model: string
+  request_type: string
+  created_at: string
+  request_headers?: UsageDetailPayload | null
+  request?: UsageDetailPayload | null
+  final_request?: UsageDetailPayload | null
+  response_headers?: UsageDetailPayload | null
+  response?: UsageDetailPayload | null
+}
+
 export interface UsageCleanupFilters {
   start_time: string
   end_time: string
@@ -1419,6 +1445,29 @@ export interface DashboardStats {
   // 性能指标
   rpm: number // 近5分钟平均每分钟请求数
   tpm: number // 近5分钟平均每分钟Token数
+}
+
+export interface InputCacheMetricsSnapshot {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  cache_read_ratio?: number | null
+  total_cache_tokens: number
+  total_tokens: number
+  has_data: boolean
+  partial: boolean
+  available_from?: string | null
+}
+
+export interface InputCacheMetricsWindow extends InputCacheMetricsSnapshot {
+  start_time: string
+  end_time: string
+}
+
+export interface InputCacheMetrics {
+  cumulative?: InputCacheMetricsSnapshot | null
+  window?: InputCacheMetricsWindow | null
 }
 
 export interface UsageStatsResponse {

@@ -128,6 +128,8 @@ func (h *OpsHandler) GetDashboardSnapshotV2(c *gin.Context) {
 		return
 	}
 
+	h.attachInputCacheMetrics(c.Request.Context(), filter, overview)
+
 	resp := &opsDashboardSnapshotV2Response{
 		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
 		Overview:        overview,

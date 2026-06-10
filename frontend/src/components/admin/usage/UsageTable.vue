@@ -192,6 +192,18 @@
           <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
         </template>
 
+        <template #cell-actions="{ row }">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            :disabled="!row.has_detail"
+            :title="row.has_detail ? t('admin.usage.detail.viewAction') : t('admin.usage.detail.noDetail')"
+            @click="$emit('viewDetail', row)"
+          >
+            {{ t('admin.usage.detail.viewAction') }}
+          </button>
+        </template>
+
         <template #empty><EmptyState :message="t('usage.noRecords')" /></template>
       </DataTable>
     </div>
@@ -459,6 +471,7 @@ withDefaults(defineProps<Props>(), {
 })
 defineEmits<{
   userClick: [userID: number, email?: string]
+  viewDetail: [row: AdminUsageLog]
   sort: [key: string, order: 'asc' | 'desc']
 }>()
 const { t } = useI18n()

@@ -118,6 +118,7 @@
           :default-sort-order="'desc'"
           @sort="handleSort"
           @userClick="handleUserClick"
+          @viewDetail="handleViewDetail"
         />
         <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
       </div>
@@ -147,6 +148,14 @@
     :hide-actions="true"
     @close="showBalanceHistoryModal = false; balanceHistoryUser = null"
   />
+  <UsageDetailModal
+    :show="showUsageDetailModal"
+    :loading="usageDetailLoading"
+    :usage="selectedUsageLog"
+    :detail="usageDetail"
+    :error-message="usageDetailError"
+    @close="closeUsageDetailModal"
+  />
 </template>
 
 <script setup lang="ts">
@@ -162,6 +171,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination fro
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
+import UsageDetailModal from '@/components/admin/usage/UsageDetailModal.vue'
 import UserBalanceHistoryModal from '@/components/admin/user/UserBalanceHistoryModal.vue'
 import OpsErrorLogTable from '@/views/admin/ops/components/OpsErrorLogTable.vue'
 import OpsErrorDetailModal from '@/views/admin/ops/components/OpsErrorDetailModal.vue'
@@ -170,7 +180,7 @@ import type { OpsErrorLog } from '@/api/admin/ops'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'; import GroupDistributionChart from '@/components/charts/GroupDistributionChart.vue'; import TokenUsageTrend from '@/components/charts/TokenUsageTrend.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
 import Icon from '@/components/icons/Icon.vue'
-import type { AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
+import type { AdminUsageDetailResponse, AdminUsageLog, TrendDataPoint, ModelStat, GroupStat, EndpointStat, AdminUser } from '@/types'; import type { AdminUsageStatsResponse, AdminUsageQueryParams } from '@/api/admin/usage'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -179,7 +189,7 @@ type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
 const route = useRoute()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
-const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
+const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('day')
 const modelDistributionMetric = ref<DistributionMetric>('tokens')
 const modelDistributionSource = ref<ModelDistributionSource>('requested')
 const loadedModelSources = reactive<Record<ModelDistributionSource, boolean>>({
@@ -203,6 +213,11 @@ const cleanupDialogVisible = ref(false)
 // Balance history modal state
 const showBalanceHistoryModal = ref(false)
 const balanceHistoryUser = ref<AdminUser | null>(null)
+const showUsageDetailModal = ref(false)
+const selectedUsageLog = ref<AdminUsageLog | null>(null)
+const usageDetail = ref<AdminUsageDetailResponse | null>(null)
+const usageDetailLoading = ref(false)
+const usageDetailError = ref('')
 
 const breakdownFilters = computed(() => {
   const f: Record<string, any> = {}
@@ -229,6 +244,29 @@ const handleUserClick = async (userId: number) => {
   }
 }
 
+const handleViewDetail = async (log: AdminUsageLog) => {
+  selectedUsageLog.value = log
+  usageDetail.value = null
+  usageDetailError.value = ''
+  showUsageDetailModal.value = true
+  usageDetailLoading.value = true
+  try {
+    usageDetail.value = await adminUsageAPI.getDetail(log.id)
+  } catch (error: any) {
+    usageDetailError.value = error?.response?.data?.message || t('admin.usage.detail.loadFailed')
+  } finally {
+    usageDetailLoading.value = false
+  }
+}
+
+const closeUsageDetailModal = () => {
+  showUsageDetailModal.value = false
+  usageDetailLoading.value = false
+  usageDetailError.value = ''
+  usageDetail.value = null
+  selectedUsageLog.value = null
+}
+
 const granularityOptions = computed(() => [{ value: 'day', label: t('admin.dashboard.day') }, { value: 'hour', label: t('admin.dashboard.hour') }])
 // Use local timezone to avoid UTC timezone issues
 const formatLD = (d: Date) => {
@@ -237,23 +275,22 @@ const formatLD = (d: Date) => {
   const day = String(d.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
 }
-const getLast24HoursRangeDates = (): { start: string; end: string } => {
+const getRecentDaysDateRangeLocal = (days: number) => {
   const end = new Date()
-  const start = new Date(end.getTime() - 24 * 60 * 60 * 1000)
-  return {
-    start: formatLD(start),
-    end: formatLD(end)
-  }
+  const start = new Date(end)
+  start.setDate(start.getDate() - Math.max(0, days - 1))
+  return { startDate: formatLD(start), endDate: formatLD(end) }
 }
+const getDefaultUsageDateRange = () => getRecentDaysDateRangeLocal(30)
 const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
   const startTime = new Date(`${start}T00:00:00`).getTime()
   const endTime = new Date(`${end}T00:00:00`).getTime()
   const daysDiff = Math.ceil((endTime - startTime) / (1000 * 60 * 60 * 24))
   return daysDiff <= 1 ? 'hour' : 'day'
 }
-const defaultRange = getLast24HoursRangeDates()
-const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
-const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, billing_type: null, start_date: startDate.value, end_date: endDate.value })
+const defaultDateRange = getDefaultUsageDateRange()
+const startDate = ref(defaultDateRange.startDate); const endDate = ref(defaultDateRange.endDate)
+const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, billing_type: null, billing_mode: undefined, start_date: startDate.value, end_date: endDate.value })
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
 const sortState = reactive({
   sort_by: 'created_at',
@@ -471,9 +508,9 @@ const refreshData = () => {
   if (activeTab.value === 'errors') loadAdminErrors()
 }
 const resetFilters = () => {
-  const range = getLast24HoursRangeDates()
-  startDate.value = range.start
-  endDate.value = range.end
+  const defaultDateRange = getDefaultUsageDateRange()
+  startDate.value = defaultDateRange.startDate
+  endDate.value = defaultDateRange.endDate
   filters.value = { start_date: startDate.value, end_date: endDate.value, request_type: undefined, billing_type: null, billing_mode: undefined }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   applyFilters()
@@ -583,9 +620,12 @@ const toggleableColumns = computed(() =>
 )
 
 const visibleColumns = computed(() =>
-  allColumns.value.filter(col =>
+  [
+    ...allColumns.value.filter(col =>
     ALWAYS_VISIBLE.includes(col.key) || !hiddenColumns.has(col.key)
-  )
+    ),
+    { key: 'actions', label: t('common.actions'), sortable: false }
+  ]
 )
 
 const isColumnVisible = (key: string) => !hiddenColumns.has(key)

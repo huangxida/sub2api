@@ -1382,6 +1382,9 @@ func shouldInferIngressFunctionCallOutputPreviousResponseID(
 	if signals.HasFunctionCallOutputMissingCallID {
 		return false
 	}
+	if signals.HasTurnAbortedMarker {
+		return false
+	}
 	// If the client already sent the actual tool-call context, treat this as
 	// a full replay / self-contained continuation payload rather than
 	// downgrading it into an inferred delta continuation. item_reference alone
@@ -2455,6 +2458,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			ctx = withOpenAIFastPolicyContext(ctx, settings)
 		}
 	}
+	unknownModelFallbackSettings := s.getOpenAIUnknownModelFallbackSettings(ctx)
 
 	wsDecision := s.getOpenAIWSProtocolResolver().Resolve(account)
 	modeRouterV2Enabled := s != nil && s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled
@@ -2647,12 +2651,30 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				normalized = rebuilt
 			}
 		}
-		upstreamModel := normalizeOpenAIModelForUpstream(account, account.GetMappedModel(originalModel))
+		modelNormalization := normalizeOpenAIModelForUpstreamWithUnknownFallback(
+			account,
+			account.GetMappedModel(originalModel),
+			unknownModelFallbackSettings,
+		)
+		upstreamModel := modelNormalization.Model
 		if modelMissing || upstreamModel != originalModel {
 			next, setErr := applyPayloadMutation(normalized, "model", upstreamModel)
 			if setErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
 			}
+			normalized = next
+		}
+		if modelNormalization.DerivedReasoningEffort != "" &&
+			!hasNonEmptyOpenAIReasoningEffortInBody(normalized) {
+			next, setErr := sjson.SetBytes(normalized, "reasoning.effort", modelNormalization.DerivedReasoningEffort)
+			if setErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", setErr)
+			}
+			normalized = next
+		}
+		if next, effortNormalized, normalizeErr := normalizeOpenAIReasoningEffortInBody(normalized); normalizeErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", normalizeErr)
+		} else if effortNormalized {
 			normalized = next
 		}
 		imageIntent := IsImageGenerationIntent(openAIResponsesEndpoint, originalModel, normalized)
@@ -3058,6 +3080,16 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		turnStart := time.Now()
 		wroteDownstream := false
+		frameRecorder := NewUsageCapturedFrameRecorder(s.usageDetailCapture.MaxResponseBytes, s.usageDetailCapture.MaxWSResponseFrames)
+		writeClientMessage := func(message []byte) error {
+			writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+			defer cancel()
+			if err := clientConn.Write(writeCtx, coderws.MessageText, message); err != nil {
+				return err
+			}
+			frameRecorder.Add(message)
+			return nil
+		}
 		if err := lease.WriteJSONWithContextTimeout(ctx, json.RawMessage(payload), s.openAIWSWriteTimeout()); err != nil {
 			return nil, wrapOpenAIWSIngressTurnError(
 				"write_upstream",
@@ -3096,7 +3128,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		mappedModel := ""
 		var mappedModelBytes []byte
 		if originalModel != "" {
-			mappedModel = normalizeOpenAIModelForUpstream(account, account.GetMappedModel(originalModel))
+			mappedModel = normalizeOpenAIModelForUpstreamWithUnknownFallback(
+				account,
+				account.GetMappedModel(originalModel),
+				unknownModelFallbackSettings,
+			).Model
 			needModelReplace = mappedModel != "" && mappedModel != originalModel
 			if needModelReplace {
 				mappedModelBytes = []byte(mappedModel)
@@ -3269,19 +3305,31 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 						clientDisconnected,
 					)
 				}
+				requestPayload := CaptureUsagePayload(payload, s.usageDetailCapture.MaxRequestBytes)
+				responsePayload := frameRecorder.Snapshot()
 				imageCount := imageCounter.Count()
 				result := &OpenAIForwardResult{
-					RequestID:       responseID,
-					Usage:           usage,
-					Model:           originalModel,
-					UpstreamModel:   mappedModel,
-					ServiceTier:     extractOpenAIServiceTierFromBody(payload),
-					ReasoningEffort: extractOpenAIReasoningEffortFromBody(payload, originalModel),
-					Stream:          reqStream,
-					OpenAIWSMode:    true,
-					ResponseHeaders: lease.HandshakeHeaders(),
-					Duration:        time.Since(turnStart),
-					FirstTokenMs:    firstTokenMs,
+					RequestID:           responseID,
+					ResponseID:          responseID,
+					Usage:               usage,
+					Model:               originalModel,
+					UpstreamModel:       mappedModel,
+					ServiceTier:         extractOpenAIServiceTierFromBody(payload),
+					ReasoningEffort:     extractOpenAIReasoningEffortFromBody(payload, originalModel),
+					Stream:              reqStream,
+					OpenAIWSMode:        true,
+					RequestBody:         requestPayload.Body,
+					RequestBytes:        requestPayload.Bytes,
+					RequestComplete:     requestPayload.Complete,
+					RequestContentType:  "application/json",
+					ResponseFrames:      responsePayload.Frames,
+					ResponseBytes:       responsePayload.Bytes,
+					ResponseContentType: "application/json",
+					ResponseComplete:    !clientDisconnected && responsePayload.Complete,
+					ResponseHeaders:     lease.HandshakeHeaders(),
+					Duration:            time.Since(turnStart),
+					FirstTokenMs:        firstTokenMs,
+					ClientDisconnect:    clientDisconnected,
 				}
 				if replayInput := replayCollector.Items(); len(replayInput) > 0 {
 					result.wsReplayInput = replayInput
@@ -4213,8 +4261,9 @@ func (s *OpenAIGatewayService) SelectAccountByPreviousResponseID(
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 	requireCompact bool,
+	unknownFallbackSettings OpenAIUnknownModelFallbackSettings,
 ) (*AccountSelectionResult, error) {
-	return s.selectAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, "", requireCompact)
+	return s.selectAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, "", requireCompact, unknownFallbackSettings)
 }
 
 func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
@@ -4225,6 +4274,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	excludedIDs map[int64]struct{},
 	requiredCapability OpenAIEndpointCapability,
 	requireCompact bool,
+	unknownFallbackSettings OpenAIUnknownModelFallbackSettings,
 ) (*AccountSelectionResult, error) {
 	if s == nil {
 		return nil, nil
@@ -4262,7 +4312,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 		return nil, nil
 	}
-	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+	if !openAIAccountSupportsRequestedOrFallbackModel(account, requestedModel, requireCompact, unknownFallbackSettings) {
 		return nil, nil
 	}
 	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {
@@ -4285,7 +4335,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 			_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
 			return nil, nil
 		}
-		if requestedModel != "" && !latest.IsModelSupported(requestedModel) {
+		if !openAIAccountSupportsRequestedOrFallbackModel(latest, requestedModel, requireCompact, unknownFallbackSettings) {
 			return nil, nil
 		}
 		if !latest.SupportsOpenAIEndpointCapability(requiredCapability) {
@@ -4299,6 +4349,11 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 			return nil, nil
 		}
 		account = latest
+	}
+	account = s.recheckSelectedOpenAIAccountFromDB(ctx, account, requestedModel, requireCompact, unknownFallbackSettings, requiredCapability)
+	if account == nil {
+		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		return nil, nil
 	}
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)

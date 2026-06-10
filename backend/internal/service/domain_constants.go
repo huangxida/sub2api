@@ -312,6 +312,12 @@ const (
 	SettingKeyFallbackModelGemini      = "fallback_model_gemini"
 	SettingKeyFallbackModelAntigravity = "fallback_model_antigravity"
 
+	// OpenAI unknown model fallback settings. This is distinct from the
+	// request-failure fallback above: it rewrites unrecognized request model
+	// names before the upstream call is made.
+	SettingKeyOpenAIUnknownModelFallbackModel = "openai_unknown_model_fallback_model"
+	SettingKeyOpenAIUnknownModelFallbackScope = "openai_unknown_model_fallback_scope"
+
 	// Request identity patch (Claude -> Gemini systemInstruction injection)
 	SettingKeyEnableIdentityPatch = "enable_identity_patch"
 	SettingKeyIdentityPatchPrompt = "identity_patch_prompt"

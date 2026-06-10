@@ -661,6 +661,101 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	}
 }
 
+func AdminUsageDetailFromService(log *service.UsageLog, detail *service.UsageLogDetail) *AdminUsageDetailResponse {
+	if log == nil {
+		return nil
+	}
+
+	resp := &AdminUsageDetailResponse{
+		UsageLogID:  log.ID,
+		HasDetail:   detail != nil,
+		RequestID:   log.RequestID,
+		Model:       log.Model,
+		RequestType: log.EffectiveRequestType().String(),
+		CreatedAt:   log.CreatedAt,
+	}
+	if detail == nil {
+		return resp
+	}
+
+	if detail.RequestHeaders != nil {
+		contentType := "application/json"
+		complete := true
+		resp.RequestHeaders = &UsageDetailPayload{
+			Kind:        "body",
+			ContentType: &contentType,
+			SizeBytes:   int64(len([]byte(*detail.RequestHeaders))),
+			IsJSON:      true,
+			Complete:    &complete,
+			Body:        detail.RequestHeaders,
+		}
+	}
+
+	if detail.RequestBody != nil || detail.RequestContentType != nil || detail.RequestBytes > 0 {
+		complete := detail.RequestComplete
+		resp.Request = &UsageDetailPayload{
+			Kind:        "body",
+			ContentType: detail.RequestContentType,
+			SizeBytes:   detail.RequestBytes,
+			IsJSON:      detail.RequestIsJSON,
+			Complete:    &complete,
+			Body:        detail.RequestBody,
+		}
+	}
+
+	if detail.FinalRequestBody != nil || detail.FinalRequestContentType != nil || detail.FinalRequestBytes > 0 {
+		complete := detail.FinalRequestComplete
+		resp.FinalRequest = &UsageDetailPayload{
+			Kind:        "body",
+			ContentType: detail.FinalRequestContentType,
+			SizeBytes:   detail.FinalRequestBytes,
+			IsJSON:      detail.FinalRequestIsJSON,
+			Complete:    &complete,
+			Body:        detail.FinalRequestBody,
+		}
+	}
+
+	if detail.ResponseHeaders != nil {
+		contentType := "application/json"
+		complete := true
+		resp.ResponseHeaders = &UsageDetailPayload{
+			Kind:        "body",
+			ContentType: &contentType,
+			SizeBytes:   int64(len([]byte(*detail.ResponseHeaders))),
+			IsJSON:      true,
+			Complete:    &complete,
+			Body:        detail.ResponseHeaders,
+		}
+	}
+
+	if len(detail.ResponseFrames) > 0 {
+		complete := detail.ResponseComplete
+		resp.Response = &UsageDetailPayload{
+			Kind:        "frames",
+			ContentType: detail.ResponseContentType,
+			SizeBytes:   detail.ResponseBytes,
+			IsJSON:      detail.ResponseIsJSON,
+			Complete:    &complete,
+			Frames:      detail.ResponseFrames,
+		}
+		return resp
+	}
+
+	if detail.ResponseBody != nil || detail.ResponseContentType != nil || detail.ResponseBytes > 0 {
+		complete := detail.ResponseComplete
+		resp.Response = &UsageDetailPayload{
+			Kind:        "body",
+			ContentType: detail.ResponseContentType,
+			SizeBytes:   detail.ResponseBytes,
+			IsJSON:      detail.ResponseIsJSON,
+			Complete:    &complete,
+			Body:        detail.ResponseBody,
+		}
+	}
+
+	return resp
+}
+
 func UsageCleanupTaskFromService(task *service.UsageCleanupTask) *UsageCleanupTask {
 	if task == nil {
 		return nil

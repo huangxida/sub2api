@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,8 @@ type dashboardSnapshotV2Response struct {
 	Models     []usagestats.ModelStat           `json:"models,omitempty"`
 	Groups     []usagestats.GroupStat           `json:"groups,omitempty"`
 	UsersTrend []usagestats.UserUsageTrendPoint `json:"users_trend,omitempty"`
+
+	InputCacheMetrics *service.InputCacheMetrics `json:"input_cache_metrics,omitempty"`
 }
 
 type dashboardSnapshotV2Filters struct {
@@ -238,7 +241,80 @@ func (h *DashboardHandler) buildSnapshotV2Response(
 		resp.UsersTrend = usersTrend
 	}
 
+	if metrics, err := h.buildInputCacheMetrics(ctx, startTime, endTime, filters, resp.Trend); err != nil {
+		log.Printf("[DashboardSnapshotV2] build input cache metrics failed: %v", err)
+	} else {
+		resp.InputCacheMetrics = metrics
+	}
+
 	return resp, nil
+}
+
+func (h *DashboardHandler) buildInputCacheMetrics(
+	ctx context.Context,
+	startTime, endTime time.Time,
+	filters *dashboardSnapshotV2Filters,
+	trend []usagestats.TrendDataPoint,
+) (*service.InputCacheMetrics, error) {
+	if h == nil || h.dashboardService == nil {
+		return nil, nil
+	}
+
+	now := time.Now().UTC()
+	usageFilters := dashboardSnapshotUsageLogFilters(filters, &startTime, &endTime)
+	filtered := service.HasDashboardInputCacheScopedFilters(usageFilters)
+	availableFrom := h.dashboardService.InputCacheAvailableFrom(now)
+
+	cumulativeSummary, err := h.dashboardService.GetCumulativeInputCacheSummary(ctx, usageFilters)
+	if err != nil {
+		return nil, err
+	}
+
+	var windowSummary *usagestats.InputCacheSummary
+	windowPartial := filtered && startTime.UTC().Before(availableFrom)
+	var windowAvailableFrom *time.Time
+	if windowPartial {
+		windowAvailableFrom = &availableFrom
+	}
+	if len(trend) > 0 {
+		windowSummary = service.SumTrendInputCacheSummary(trend)
+	} else {
+		if windowPartial {
+			usageFilters.StartTime = &availableFrom
+		}
+		summary, err := h.dashboardService.GetInputCacheSummary(ctx, usageFilters)
+		if err != nil {
+			return nil, err
+		}
+		windowSummary = summary
+	}
+
+	return &service.InputCacheMetrics{
+		Cumulative: service.BuildInputCacheMetricsSnapshot(cumulativeSummary, filtered, func() *time.Time {
+			if filtered {
+				return &availableFrom
+			}
+			return nil
+		}()),
+		Window: service.BuildInputCacheMetricsWindow(windowSummary, startTime, endTime, windowPartial, windowAvailableFrom),
+	}, nil
+}
+
+func dashboardSnapshotUsageLogFilters(filters *dashboardSnapshotV2Filters, startTime, endTime *time.Time) usagestats.UsageLogFilters {
+	var usageFilters usagestats.UsageLogFilters
+	if filters != nil {
+		usageFilters.UserID = filters.UserID
+		usageFilters.APIKeyID = filters.APIKeyID
+		usageFilters.AccountID = filters.AccountID
+		usageFilters.GroupID = filters.GroupID
+		usageFilters.Model = filters.Model
+		usageFilters.RequestType = filters.RequestType
+		usageFilters.Stream = filters.Stream
+		usageFilters.BillingType = filters.BillingType
+	}
+	usageFilters.StartTime = startTime
+	usageFilters.EndTime = endTime
+	return usageFilters
 }
 
 func parseDashboardSnapshotV2Filters(c *gin.Context) (*dashboardSnapshotV2Filters, error) {

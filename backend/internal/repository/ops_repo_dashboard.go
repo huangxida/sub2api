@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -807,6 +808,40 @@ FROM usage_logs ul
 		tokenConsumed = tokens.Int64
 	}
 	return successCount, tokenConsumed, nil
+}
+
+func (r *opsRepository) GetInputCacheSummary(ctx context.Context, filter *service.OpsDashboardFilter) (*usagestats.InputCacheSummary, error) {
+	if r == nil || r.db == nil {
+		return nil, fmt.Errorf("nil ops repository")
+	}
+	if filter == nil {
+		return nil, fmt.Errorf("nil filter")
+	}
+	if filter.StartTime.IsZero() || filter.EndTime.IsZero() {
+		return nil, fmt.Errorf("start_time/end_time required")
+	}
+	if !filter.StartTime.Before(filter.EndTime) {
+		return &usagestats.InputCacheSummary{}, nil
+	}
+
+	start := filter.StartTime.UTC()
+	end := filter.EndTime.UTC()
+	join, where, args, _ := buildUsageWhere(filter, start, end, 1)
+	q := `
+SELECT
+  COALESCE(SUM(input_tokens), 0) AS input_tokens,
+  COALESCE(SUM(output_tokens), 0) AS output_tokens,
+  COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+  COALESCE(SUM(cache_creation_tokens), 0) AS cache_creation_tokens
+FROM usage_logs ul
+` + join + `
+` + where
+
+	summary := &usagestats.InputCacheSummary{}
+	if err := scanSingleRow(ctx, r.db, q, args, &summary.InputTokens, &summary.OutputTokens, &summary.CacheReadTokens, &summary.CacheCreationTokens); err != nil {
+		return nil, err
+	}
+	return summary, nil
 }
 
 func (r *opsRepository) queryUsageLatency(ctx context.Context, filter *service.OpsDashboardFilter, start, end time.Time) (duration service.OpsPercentiles, ttft service.OpsPercentiles, ttftSampleCount int64, err error) {

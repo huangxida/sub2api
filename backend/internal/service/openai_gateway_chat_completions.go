@@ -76,11 +76,19 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 	originalModel := chatReq.Model
 	clientStream := chatReq.Stream
+	if normalizedEffort := normalizeOpenAIReasoningEffort(chatReq.ReasoningEffort); normalizedEffort != "" {
+		chatReq.ReasoningEffort = normalizedEffort
+	}
 
 	// 2. Resolve model mapping early so compat prompt_cache_key injection can
 	// derive a stable seed from the final upstream model family.
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	normalization := normalizeOpenAIModelForUpstreamWithUnknownFallback(
+		account,
+		billingModel,
+		s.getOpenAIUnknownModelFallbackSettings(ctx),
+	)
+	upstreamModel := normalization.Model
 
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
 	compatPromptCacheInjected := false
@@ -127,6 +135,18 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		if err != nil {
 			return nil, fmt.Errorf("normalize service_tier in responses-shape body: %w", err)
 		}
+		if normalization.DerivedReasoningEffort != "" &&
+			!hasNonEmptyOpenAIReasoningEffortInBody(responsesBody) {
+			responsesBody, err = sjson.SetBytes(responsesBody, "reasoning.effort", normalization.DerivedReasoningEffort)
+			if err != nil {
+				return nil, fmt.Errorf("set derived reasoning.effort: %w", err)
+			}
+		}
+		if normalizedBody, effortNormalized, normalizeErr := normalizeOpenAIReasoningEffortInBody(responsesBody); normalizeErr != nil {
+			return nil, normalizeErr
+		} else if effortNormalized {
+			responsesBody = normalizedBody
+		}
 		// Minimal stub populated from the raw body so downstream billing
 		// propagation (ServiceTier, ReasoningEffort) keeps working.
 		responsesReq = &apicompat.ResponsesRequest{
@@ -144,6 +164,14 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
 		}
 		responsesReq.Model = upstreamModel
+		if normalization.DerivedReasoningEffort != "" &&
+			(responsesReq.Reasoning == nil || strings.TrimSpace(responsesReq.Reasoning.Effort) == "") {
+			if responsesReq.Reasoning == nil {
+				responsesReq.Reasoning = &apicompat.ResponsesReasoning{Summary: "auto"}
+			}
+			responsesReq.Reasoning.Effort = normalization.DerivedReasoningEffort
+		}
+		normalizeOpenAIResponsesRequestReasoning(responsesReq)
 		normalizeResponsesRequestServiceTier(responsesReq)
 		responsesBody, err = json.Marshal(responsesReq)
 		if err != nil {

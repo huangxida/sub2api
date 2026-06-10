@@ -4,8 +4,14 @@
  */
 
 import { apiClient } from '../client'
-import type { AdminUsageLog, UsageQueryParams, PaginatedResponse, UsageRequestType } from '@/types'
-import type { EndpointStat } from '@/types'
+import type {
+  AdminUsageDetailResponse,
+  AdminUsageLog,
+  EndpointStat,
+  PaginatedResponse,
+  UsageQueryParams,
+  UsageRequestType,
+} from '@/types'
 
 // ==================== Types ====================
 
@@ -84,6 +90,11 @@ export interface AdminUsageQueryParams extends UsageQueryParams {
   billing_mode?: string
   sort_by?: string
   sort_order?: 'asc' | 'desc'
+}
+
+export async function getDetail(usageLogID: number): Promise<AdminUsageDetailResponse> {
+  const { data } = await apiClient.get<AdminUsageDetailResponse>(`/admin/usage/${usageLogID}/detail`)
+  return data
 }
 
 // ==================== API Functions ====================
@@ -200,6 +211,7 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
 
 export const adminUsageAPI = {
   list,
+  getDetail,
   getStats,
   searchUsers,
   searchApiKeys,

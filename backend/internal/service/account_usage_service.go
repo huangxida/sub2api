@@ -67,6 +67,7 @@ type UsageLogRepository interface {
 	ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters usagestats.UsageLogFilters) ([]UsageLog, *pagination.PaginationResult, error)
 	GetGlobalStats(ctx context.Context, startTime, endTime time.Time) (*usagestats.UsageStats, error)
 	GetStatsWithFilters(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.UsageStats, error)
+	GetInputCacheSummary(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.InputCacheSummary, error)
 
 	// Account stats
 	GetAccountUsageStats(ctx context.Context, accountID int64, startTime, endTime time.Time) (*usagestats.AccountUsageStatsResponse, error)

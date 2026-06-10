@@ -524,6 +524,12 @@ const props = withDefaults(
 
 const { t } = useI18n()
 const desktopViewportQuery = '(min-width: 768px)'
+const getDesktopViewportMatches = () => {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return true
+  }
+  return window.matchMedia(desktopViewportQuery).matches
+}
 
 const unmounted = ref(false)
 onBeforeUnmount(() => { unmounted.value = true })
@@ -533,12 +539,11 @@ const activeQueryLoading = ref(false)
 const error = ref<string | null>(null)
 const usageInfo = ref<AccountUsageInfo | null>(null)
 const rootRef = ref<HTMLElement | null>(null)
-const isDesktopViewport = ref(
-  typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
-)
+const isDesktopViewport = ref(getDesktopViewportMatches())
 const hasEnteredViewport = ref(false)
 const pendingAutoLoad = ref(false)
 const pendingAutoLoadSource = ref<'passive' | 'active' | undefined>(undefined)
+const pendingAutoLoadBypassCache = ref(false)
 
 let desktopViewportMediaQuery: MediaQueryList | null = null
 let desktopViewportListener: ((event: MediaQueryListEvent) => void) | null = null
@@ -1027,7 +1032,11 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
   error.value = null
 
   try {
-    const fetchFn = () => adminAPI.accounts.getUsage(props.account.id, options?.source)
+    const fetchFn = () => (
+      options?.source
+        ? adminAPI.accounts.getUsage(props.account.id, options.source)
+        : adminAPI.accounts.getUsage(props.account.id)
+    )
     const result = await enqueueUsageRequest(props.account, fetchFn)
     if (!unmounted.value) {
       usageInfo.value = result
@@ -1046,21 +1055,24 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
 const flushPendingAutoLoad = () => {
   if (!pendingAutoLoad.value) return
   const source = pendingAutoLoadSource.value
+  const bypassCache = pendingAutoLoadBypassCache.value
   pendingAutoLoad.value = false
   pendingAutoLoadSource.value = undefined
-  loadUsage({ source }).catch((e) => {
+  pendingAutoLoadBypassCache.value = false
+  loadUsage({ source, bypassCache }).catch((e) => {
     console.error('Failed to load deferred usage:', e)
   })
 }
 
-const requestAutoLoad = (source?: 'passive' | 'active') => {
+const requestAutoLoad = (source?: 'passive' | 'active', options?: { bypassCache?: boolean }) => {
   if (!shouldFetchUsage.value) return
   if (shouldLazyLoadOnMobile.value && !hasEnteredViewport.value) {
     pendingAutoLoad.value = true
     pendingAutoLoadSource.value = source
+    pendingAutoLoadBypassCache.value = !!options?.bypassCache
     return
   }
-  loadUsage({ source }).catch((e) => {
+  loadUsage({ source, bypassCache: options?.bypassCache }).catch((e) => {
     console.error('Failed to auto load usage:', e)
   })
 }
@@ -1192,7 +1204,7 @@ const formatKeyUserCost = computed(() => {
 })
 
 onMounted(() => {
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
     desktopViewportMediaQuery = window.matchMedia(desktopViewportQuery)
     isDesktopViewport.value = desktopViewportMediaQuery.matches
     desktopViewportListener = (event: MediaQueryListEvent) => {
@@ -1214,7 +1226,8 @@ watch(openAIUsageRefreshKey, (nextKey, prevKey) => {
   if (!prevKey || nextKey === prevKey) return
   if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return
 
-  requestAutoLoad()
+  _usageCache.delete(props.account.id)
+  requestAutoLoad(undefined, { bypassCache: true })
 })
 
 watch(

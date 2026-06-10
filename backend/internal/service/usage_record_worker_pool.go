@@ -32,6 +32,16 @@ const (
 	usageRecordDropLogInterval             = 5 * time.Second
 )
 
+type usageRecordSyncFallbackContextKey struct{}
+
+func IsUsageRecordSyncFallback(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	value, _ := ctx.Value(usageRecordSyncFallbackContextKey{}).(bool)
+	return value
+}
+
 // UsageRecordTask 是提交到使用量记录池的任务。
 // 任务实现应自行处理业务错误日志；池本身只负责调度与超时控制。
 type UsageRecordTask func(ctx context.Context)
@@ -153,7 +163,7 @@ func (p *UsageRecordWorkerPool) Submit(task UsageRecordTask) UsageRecordSubmitMo
 	}
 
 	_, ok := p.pool.TrySubmit(func() {
-		p.execute(task)
+		p.execute(task, false)
 	})
 	if ok {
 		return UsageRecordSubmitModeEnqueued
@@ -168,12 +178,12 @@ func (p *UsageRecordWorkerPool) Submit(task UsageRecordTask) UsageRecordSubmitMo
 	switch p.overflowPolicy {
 	case config.UsageRecordOverflowPolicySync:
 		p.syncFallback.Add(1)
-		p.execute(task)
+		p.execute(task, true)
 		return UsageRecordSubmitModeSync
 	case config.UsageRecordOverflowPolicySample:
 		if p.shouldSyncFallback() {
 			p.syncFallback.Add(1)
-			p.execute(task)
+			p.execute(task, true)
 			return UsageRecordSubmitModeSync
 		}
 	}
@@ -314,9 +324,12 @@ func (p *UsageRecordWorkerPool) shouldSyncFallback() bool {
 	return int((n-1)%100) < p.overflowSamplePercent
 }
 
-func (p *UsageRecordWorkerPool) execute(task UsageRecordTask) {
+func (p *UsageRecordWorkerPool) execute(task UsageRecordTask, syncFallback bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.taskTimeout)
 	defer cancel()
+	if syncFallback {
+		ctx = context.WithValue(ctx, usageRecordSyncFallbackContextKey{}, true)
+	}
 
 	defer func() {
 		if recovered := recover(); recovered != nil {

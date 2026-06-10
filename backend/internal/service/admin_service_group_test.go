@@ -385,9 +385,11 @@ func TestAdminService_CreateGroup_NormalizesMessagesDispatchModelConfig(t *testi
 		Platform:       PlatformOpenAI,
 		RateMultiplier: 1.0,
 		MessagesDispatchModelConfig: OpenAIMessagesDispatchModelConfig{
-			OpusMappedModel:   " gpt-5.4-high ",
-			SonnetMappedModel: " gpt-5.3-codex ",
-			HaikuMappedModel:  " gpt-5.4-mini-medium ",
+			OpusMappedModel:       " gpt-5.4-high ",
+			SonnetMappedModel:     " gpt-5.3-codex ",
+			HaikuMappedModel:      " gpt-5.4-mini-medium ",
+			ForcedReasoningEffort: " extra_high ",
+			ForcedFastMode:        true,
 			ExactModelMappings: map[string]string{
 				" claude-sonnet-4-5-20250929 ": " gpt-5.2-high ",
 			},
@@ -397,9 +399,11 @@ func TestAdminService_CreateGroup_NormalizesMessagesDispatchModelConfig(t *testi
 	require.NotNil(t, group)
 	require.NotNil(t, repo.created)
 	require.Equal(t, OpenAIMessagesDispatchModelConfig{
-		OpusMappedModel:   "gpt-5.4",
-		SonnetMappedModel: "gpt-5.3-codex",
-		HaikuMappedModel:  "gpt-5.4-mini",
+		OpusMappedModel:       "gpt-5.4",
+		SonnetMappedModel:     "gpt-5.3-codex",
+		HaikuMappedModel:      "gpt-5.4-mini",
+		ForcedReasoningEffort: "xhigh",
+		ForcedFastMode:        true,
 		ExactModelMappings: map[string]string{
 			"claude-sonnet-4-5-20250929": "gpt-5.2",
 		},
@@ -419,6 +423,7 @@ func TestAdminService_UpdateGroup_NormalizesMessagesDispatchModelConfig(t *testi
 	group, err := svc.UpdateGroup(context.Background(), 1, &UpdateGroupInput{
 		MessagesDispatchModelConfig: &OpenAIMessagesDispatchModelConfig{
 			SonnetMappedModel: " gpt-5.4-medium ",
+			ForcedFastMode:    true,
 			ExactModelMappings: map[string]string{
 				" claude-haiku-4-5-20251001 ": " gpt-5.4-mini-high ",
 			},
@@ -429,6 +434,7 @@ func TestAdminService_UpdateGroup_NormalizesMessagesDispatchModelConfig(t *testi
 	require.NotNil(t, repo.updated)
 	require.Equal(t, OpenAIMessagesDispatchModelConfig{
 		SonnetMappedModel: "gpt-5.4",
+		ForcedFastMode:    true,
 		ExactModelMappings: map[string]string{
 			"claude-haiku-4-5-20251001": "gpt-5.4-mini",
 		},

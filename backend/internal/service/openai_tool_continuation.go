@@ -13,6 +13,7 @@ type ToolContinuationSignals struct {
 	HasToolCallContext                 bool
 	HasItemReference                   bool
 	HasItemReferenceForAllCallIDs      bool
+	HasTurnAbortedMarker               bool
 	FunctionCallOutputCallIDs          []string
 }
 
@@ -110,6 +111,11 @@ func AnalyzeToolContinuationSignals(reqBody map[string]any) ToolContinuationSign
 			callID, _ := itemMap["call_id"].(string)
 			if strings.TrimSpace(callID) != "" {
 				signals.HasToolCallContext = true
+			}
+		case itemType == "input_text":
+			text, _ := itemMap["text"].(string)
+			if strings.Contains(text, "<turn_aborted>") {
+				signals.HasTurnAbortedMarker = true
 			}
 		case isCodexToolCallOutputItemType(itemType):
 			signals.HasFunctionCallOutput = true

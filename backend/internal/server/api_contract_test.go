@@ -821,6 +821,8 @@ func TestAPIContracts(t *testing.T) {
 					"fallback_model_antigravity": "gemini-2.5-pro",
 					"fallback_model_gemini": "gemini-2.5-pro",
 						"fallback_model_openai": "gpt-4o",
+						"openai_unknown_model_fallback_model": "gpt-5.5",
+						"openai_unknown_model_fallback_scope": "oauth",
 						"enable_identity_patch": true,
 						"identity_patch_prompt": "",
 						"invitation_code_enabled": false,
@@ -1060,6 +1062,8 @@ func TestAPIContracts(t *testing.T) {
 					"enable_model_fallback": false,
 					"fallback_model_anthropic": "claude-3-5-sonnet-20241022",
 					"fallback_model_openai": "gpt-4o",
+					"openai_unknown_model_fallback_model": "gpt-5.5",
+					"openai_unknown_model_fallback_scope": "oauth",
 					"fallback_model_gemini": "gemini-2.5-pro",
 					"fallback_model_antigravity": "gemini-2.5-pro",
 					"enable_identity_patch": true,
@@ -2342,6 +2346,10 @@ func (r *stubUsageLogRepo) GetAccountTodayStats(ctx context.Context, accountID i
 
 func (r *stubUsageLogRepo) GetDashboardStats(ctx context.Context) (*usagestats.DashboardStats, error) {
 	return nil, errors.New("not implemented")
+}
+
+func (r *stubUsageLogRepo) GetInputCacheSummary(ctx context.Context, filters usagestats.UsageLogFilters) (*usagestats.InputCacheSummary, error) {
+	return &usagestats.InputCacheSummary{}, nil
 }
 
 func (r *stubUsageLogRepo) GetUsageTrendWithFilters(ctx context.Context, startTime, endTime time.Time, granularity string, userID, apiKeyID, accountID, groupID int64, model string, requestType *int16, stream *bool, billingType *int8) ([]usagestats.TrendDataPoint, error) {

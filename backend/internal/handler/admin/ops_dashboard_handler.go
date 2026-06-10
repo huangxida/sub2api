@@ -50,6 +50,7 @@ func (h *OpsHandler) GetDashboardOverview(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	h.attachInputCacheMetrics(c.Request.Context(), filter, data)
 	response.Success(c, data)
 }
 

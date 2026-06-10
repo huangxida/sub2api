@@ -32,6 +32,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	body []byte,
 	promptCacheKey string,
 	defaultMappedModel string,
+	forcedReasoningEffort string,
+	forcedFastMode bool,
 ) (*OpenAIForwardResult, error) {
 	startTime := time.Now()
 
@@ -48,7 +50,12 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// 2. Model mapping
 	billingModel := resolveOpenAIForwardModel(account, normalizedModel, defaultMappedModel)
-	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
+	normalization := normalizeOpenAIModelForUpstreamWithUnknownFallback(
+		account,
+		billingModel,
+		s.getOpenAIUnknownModelFallbackSettings(ctx),
+	)
+	upstreamModel := normalization.Model
 	promptCacheKey = strings.TrimSpace(promptCacheKey)
 	apiKeyID := getAPIKeyIDFromContext(c)
 	anthropicDigestChain := ""
@@ -87,19 +94,34 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		compatReplayTrimmed = applyAnthropicCompatFullReplayGuard(&anthropicReq)
 	}
 
-	// 3. Convert Anthropic → Responses after compatibility-only replay guard.
+	// 3. Convert Anthropic 鈫?Responses after compatibility-only replay guard.
 	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("convert anthropic to responses: %w", err)
 	}
+
+	forcedReasoningEffort = normalizeOpenAIReasoningEffort(forcedReasoningEffort)
+	if forcedReasoningEffort != "" {
+		if responsesReq.Reasoning == nil {
+			responsesReq.Reasoning = &apicompat.ResponsesReasoning{Summary: "auto"}
+		}
+		responsesReq.Reasoning.Effort = forcedReasoningEffort
+	} else if normalization.DerivedReasoningEffort != "" &&
+		(responsesReq.Reasoning == nil || strings.TrimSpace(responsesReq.Reasoning.Effort) == "") {
+		if responsesReq.Reasoning == nil {
+			responsesReq.Reasoning = &apicompat.ResponsesReasoning{Summary: "auto"}
+		}
+		responsesReq.Reasoning.Effort = normalization.DerivedReasoningEffort
+	}
+	normalizeOpenAIResponsesRequestReasoning(responsesReq)
 
 	// Upstream always uses streaming (upstream may not support sync mode).
 	// The client's original preference determines the response format.
 	responsesReq.Stream = true
 	isStream := true
 
-	// 3b. Handle BetaFastMode → service_tier: "priority"
-	if containsBetaToken(c.GetHeader("anthropic-beta"), claude.BetaFastMode) {
+	// 3b. Handle forced fast mode or BetaFastMode -> service_tier: "priority"
+	if forcedFastMode || containsBetaToken(c.GetHeader("anthropic-beta"), claude.BetaFastMode) {
 		responsesReq.ServiceTier = "priority"
 	}
 
@@ -227,16 +249,18 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 4c. Apply OpenAI fast policy (may filter service_tier or block the request).
 	// Mirrors the Claude anthropic-beta "fast-mode-2026-02-01" filter, but keyed
 	// on the body-level service_tier field (priority/flex).
-	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
-	if policyErr != nil {
-		var blocked *OpenAIFastBlockedError
-		if errors.As(policyErr, &blocked) {
-			MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
-			writeAnthropicError(c, http.StatusForbidden, "forbidden_error", blocked.Message)
+	if !forcedFastMode {
+		updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
+		if policyErr != nil {
+			var blocked *OpenAIFastBlockedError
+			if errors.As(policyErr, &blocked) {
+				MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalPolicyDenied)
+				writeAnthropicError(c, http.StatusForbidden, "forbidden_error", blocked.Message)
+			}
+			return nil, policyErr
 		}
-		return nil, policyErr
+		responsesBody = updatedBody
 	}
-	responsesBody = updatedBody
 
 	// 5. Get access token
 	token, _, err := s.GetAccessToken(ctx, account)
@@ -317,7 +341,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 				zap.String("previous_response_id", truncateOpenAIWSLogValue(previousResponseID, openAIWSIDValueMaxLen)),
 				zap.String("upstream_model", upstreamModel),
 			)
-			return s.ForwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel)
+			return s.ForwardAsAnthropic(ctx, c, account, body, promptCacheKey, defaultMappedModel, forcedReasoningEffort, forcedFastMode)
 		}
 		if s.shouldFailoverOpenAIUpstreamResponse(resp.StatusCode, upstreamMsg, respBody) {
 			upstreamDetail := ""
@@ -368,6 +392,11 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
 	if handleErr == nil && result != nil {
+		result.FinalRequestBody = responsesBody
+		result.FinalRequestBytes = int64(len(responsesBody))
+		result.FinalRequestContentType = "application/json"
+		result.FinalRequestComplete = true
+		result.FinalRequestTransformed = true
 		if compatContinuationEnabled && promptCacheKey != "" && result.ResponseID != "" {
 			s.bindOpenAICompatSessionResponseID(ctx, c, account, promptCacheKey, result.ResponseID)
 		}
@@ -757,6 +786,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			return false
 		}
 
+		// 浠呮寜鍏煎杞崲鍣ㄦ敮鎸佺殑缁堟浜嬩欢鎻愬彇 usage锛岄伩鍏嶆棤鎰忔墿澶т簨浠惰涔夈€?
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)
 		if isTerminalEvent {
 			if event.Response != nil {
@@ -852,13 +882,13 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		return processDataLine(payload)
 	}
 
-	// ── Determine keepalive interval ──
+	// 鈹€鈹€ Determine keepalive interval 鈹€鈹€
 	keepaliveInterval := time.Duration(0)
 	if s.cfg != nil && s.cfg.Gateway.StreamKeepaliveInterval > 0 {
 		keepaliveInterval = time.Duration(s.cfg.Gateway.StreamKeepaliveInterval) * time.Second
 	}
 
-	// ── No keepalive: fast synchronous path (no goroutine overhead) ──
+	// 鈹€鈹€ No keepalive: fast synchronous path (no goroutine overhead) 鈹€鈹€
 	if streamInterval <= 0 && keepaliveInterval <= 0 {
 		var parser openAICompatSSEFrameParser
 		for scanner.Scan() {
@@ -889,7 +919,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 		return missingTerminalErr()
 	}
 
-	// ── With keepalive: goroutine + channel + select ──
+	// 鈹€鈹€ With keepalive: goroutine + channel + select 鈹€鈹€
 	type scanEvent struct {
 		line string
 		err  error

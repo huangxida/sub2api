@@ -318,6 +318,14 @@ func TestShouldInferIngressFunctionCallOutputPreviousResponseID(t *testing.T) {
 			expectedPrevious: "resp_2",
 			want:             false,
 		},
+		{
+			name:             "skip_when_turn_aborted_marker_present",
+			storeDisabled:    true,
+			turn:             2,
+			signals:          ToolContinuationSignals{HasFunctionCallOutput: true, HasTurnAbortedMarker: true},
+			expectedPrevious: "resp_2",
+			want:             false,
+		},
 	}
 
 	for _, tt := range tests {

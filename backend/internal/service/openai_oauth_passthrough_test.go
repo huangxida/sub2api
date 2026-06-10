@@ -59,7 +59,7 @@ func (u *httpUpstreamRecorder) DoWithTLS(req *http.Request, proxyURL string, acc
 	return u.Do(req, proxyURL, accountID, accountConcurrency)
 }
 
-func TestOpenAIGatewayService_ResponsesUnknownModelDoesNotFallbackToGPT54(t *testing.T) {
+func TestOpenAIGatewayService_ResponsesUnknownModelFallsBackToConfiguredDefault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -97,7 +97,7 @@ func TestOpenAIGatewayService_ResponsesUnknownModelDoesNotFallbackToGPT54(t *tes
 	require.Nil(t, result)
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "https://chatgpt.com/backend-api/codex/responses", upstream.lastReq.URL.String())
-	require.Equal(t, "gpt6", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "gpt-5.5", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.NotEqual(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.True(t, rec.Code >= http.StatusBadRequest)
 }

@@ -404,6 +404,22 @@ func ProvideAPIKeyAuthCacheInvalidator(apiKeyService *APIKeyService) APIKeyAuthC
 	return apiKeyService
 }
 
+// ProvideConfiguredAPIKeyService restores post-construction cache invalidation wiring.
+func ProvideConfiguredAPIKeyService(
+	apiKeyRepo APIKeyRepository,
+	userRepo UserRepository,
+	groupRepo GroupRepository,
+	subRepo UserSubscriptionRepository,
+	userGroupRateRepo UserGroupRateRepository,
+	apiKeyCache APIKeyCache,
+	billingCache BillingCache,
+	cfg *config.Config,
+) *APIKeyService {
+	svc := NewAPIKeyService(apiKeyRepo, userRepo, groupRepo, subRepo, userGroupRateRepo, apiKeyCache, cfg)
+	svc.SetRateLimitCacheInvalidator(billingCache)
+	return svc
+}
+
 // ProvideBackupService creates and starts BackupService
 func ProvideBackupService(
 	settingRepo SettingRepository,
@@ -512,6 +528,7 @@ var ProviderSet = wire.NewSet(
 	NewRedeemService,
 	NewPromoService,
 	NewUsageService,
+	NewUsageLogDetailService,
 	NewDashboardService,
 	ProvidePricingService,
 	NewBillingService,

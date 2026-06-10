@@ -35,7 +35,13 @@ func (s *openAIFastPolicyRepoStub) Set(ctx context.Context, key, value string) e
 }
 
 func (s *openAIFastPolicyRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
-	panic("unexpected GetMultiple call")
+	result := make(map[string]string, len(keys))
+	for _, key := range keys {
+		if v, ok := s.values[key]; ok {
+			result[key] = v
+		}
+	}
+	return result, nil
 }
 
 func (s *openAIFastPolicyRepoStub) SetMultiple(ctx context.Context, settings map[string]string) error {

@@ -54,6 +54,7 @@ type GatewayHandler struct {
 	maxAccountSwitchesGemini  int
 	cfg                       *config.Config
 	settingService            *service.SettingService
+	usageDetailCapture        service.UsageDetailCaptureConfig
 }
 
 // NewGatewayHandler creates a new GatewayHandler
@@ -109,6 +110,7 @@ func NewGatewayHandler(
 		maxAccountSwitchesGemini:  maxAccountSwitchesGemini,
 		cfg:                       cfg,
 		settingService:            settingService,
+		usageDetailCapture:        service.ResolveUsageDetailCaptureConfig(cfg),
 	}
 }
 
@@ -145,6 +147,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		}
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to read request body")
 		return
+	}
+	var payloadCapture *usagePayloadCaptureWriter
+	if h.usageDetailCapture.Enabled {
+		var restorePayloadCapture func()
+		payloadCapture, restorePayloadCapture = attachUsagePayloadCaptureWriter(c, h.usageDetailCapture.MaxResponseBytes)
+		defer restorePayloadCapture()
 	}
 
 	if len(body) == 0 {
@@ -516,6 +524,25 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
+			var requestHeaders http.Header
+			if h.usageDetailCapture.Enabled && c.Request != nil {
+				requestHeaders = c.Request.Header.Clone()
+			}
+			var requestPayload service.UsageCapturedPayload
+			if h.usageDetailCapture.Enabled {
+				requestPayload = service.CaptureUsagePayload(body, h.usageDetailCapture.MaxRequestBytes)
+			}
+			var responseBody []byte
+			var responseContentType string
+			var responseBytes int64
+			responseComplete := true
+			var responseHeaders http.Header
+			if payloadCapture != nil {
+				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+			}
+			if h.usageDetailCapture.Enabled {
+				responseHeaders = c.Writer.Header().Clone()
+			}
 			requestPayloadHash := service.HashUsageRequestPayload(body)
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
@@ -530,20 +557,30 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:             result,
-					QuotaPlatform:      quotaPlatform,
-					APIKey:             apiKey,
-					User:               apiKey.User,
-					Account:            account,
-					Subscription:       subscription,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					RequestPayloadHash: requestPayloadHash,
-					ForceCacheBilling:  forceCacheBilling,
-					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+					Result:              result,
+					QuotaPlatform:       quotaPlatform,
+					APIKey:              apiKey,
+					User:                apiKey.User,
+					Account:             account,
+					Subscription:        subscription,
+					InboundEndpoint:     inboundEndpoint,
+					UpstreamEndpoint:    upstreamEndpoint,
+					UserAgent:           userAgent,
+					IPAddress:           clientIP,
+					RequestHeaders:      requestHeaders,
+					RequestBody:         requestPayload.Body,
+					RequestBytes:        requestPayload.Bytes,
+					RequestComplete:     requestPayload.Complete,
+					RequestContentType:  c.ContentType(),
+					ResponseHeaders:     responseHeaders,
+					ResponseBody:        responseBody,
+					ResponseBytes:       responseBytes,
+					ResponseContentType: responseContentType,
+					ResponseComplete:    responseComplete,
+					RequestPayloadHash:  requestPayloadHash,
+					ForceCacheBilling:   forceCacheBilling,
+					APIKeyService:       h.apiKeyService,
+					ChannelUsageFields:  channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),
@@ -929,8 +966,28 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			// 捕获请求信息（用于异步记录，避免在 goroutine 中访问 gin.Context）
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
+			var requestHeaders http.Header
+			if h.usageDetailCapture.Enabled && c.Request != nil {
+				requestHeaders = c.Request.Header.Clone()
+			}
+			finalRequestBody := attemptParsedReq.Body.Bytes()
+			var requestPayload service.UsageCapturedPayload
+			if h.usageDetailCapture.Enabled {
+				requestPayload = service.CaptureUsagePayload(finalRequestBody, h.usageDetailCapture.MaxRequestBytes)
+			}
+			var responseBody []byte
+			var responseContentType string
+			var responseBytes int64
+			responseComplete := true
+			var responseHeaders http.Header
+			if payloadCapture != nil {
+				responseBody, responseContentType, responseBytes, responseComplete = payloadCapture.Snapshot()
+			}
+			if h.usageDetailCapture.Enabled {
+				responseHeaders = c.Writer.Header().Clone()
+			}
 			// Forward 内部可能继续改写 body，usage 去重指纹必须使用最终上游接受的当前 body。
-			requestPayloadHash := service.HashUsageRequestPayload(attemptParsedReq.Body.Bytes())
+			requestPayloadHash := service.HashUsageRequestPayload(finalRequestBody)
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := GetUpstreamEndpoint(c, account.Platform)
 
@@ -944,20 +1001,30 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), currentAPIKey)
 			h.submitUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
 				if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-					Result:             result,
-					QuotaPlatform:      quotaPlatform,
-					APIKey:             currentAPIKey,
-					User:               currentAPIKey.User,
-					Account:            account,
-					Subscription:       currentSubscription,
-					InboundEndpoint:    inboundEndpoint,
-					UpstreamEndpoint:   upstreamEndpoint,
-					UserAgent:          userAgent,
-					IPAddress:          clientIP,
-					RequestPayloadHash: requestPayloadHash,
-					ForceCacheBilling:  forceCacheBilling,
-					APIKeyService:      h.apiKeyService,
-					ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
+					Result:              result,
+					QuotaPlatform:       quotaPlatform,
+					APIKey:              currentAPIKey,
+					User:                currentAPIKey.User,
+					Account:             account,
+					Subscription:        currentSubscription,
+					InboundEndpoint:     inboundEndpoint,
+					UpstreamEndpoint:    upstreamEndpoint,
+					UserAgent:           userAgent,
+					IPAddress:           clientIP,
+					RequestHeaders:      requestHeaders,
+					RequestBody:         requestPayload.Body,
+					RequestBytes:        requestPayload.Bytes,
+					RequestComplete:     requestPayload.Complete,
+					RequestContentType:  c.ContentType(),
+					ResponseHeaders:     responseHeaders,
+					ResponseBody:        responseBody,
+					ResponseBytes:       responseBytes,
+					ResponseContentType: responseContentType,
+					ResponseComplete:    responseComplete,
+					RequestPayloadHash:  requestPayloadHash,
+					ForceCacheBilling:   forceCacheBilling,
+					APIKeyService:       h.apiKeyService,
+					ChannelUsageFields:  channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 				}); err != nil {
 					logger.L().With(
 						zap.String("component", "handler.gateway.messages"),

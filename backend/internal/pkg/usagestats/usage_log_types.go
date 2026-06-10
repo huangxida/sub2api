@@ -294,6 +294,14 @@ type UsageStats struct {
 	EndpointPaths            []EndpointStat `json:"endpoint_paths,omitempty"`
 }
 
+// InputCacheSummary represents model-side input cache totals.
+type InputCacheSummary struct {
+	InputTokens         int64 `json:"input_tokens"`
+	OutputTokens        int64 `json:"output_tokens"`
+	CacheReadTokens     int64 `json:"cache_read_tokens"`
+	CacheCreationTokens int64 `json:"cache_creation_tokens"`
+}
+
 // PlatformUsage 表示某用户/某 API key 在单个"有效平台"维度的用量明细。
 // Platform 取值与 ops 路径口径一致：优先 groups.platform，否则 accounts.platform。
 type PlatformUsage struct {

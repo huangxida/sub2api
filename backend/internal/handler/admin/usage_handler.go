@@ -21,24 +21,27 @@ import (
 
 // UsageHandler handles admin usage-related requests
 type UsageHandler struct {
-	usageService   *service.UsageService
-	apiKeyService  *service.APIKeyService
-	adminService   service.AdminService
-	cleanupService *service.UsageCleanupService
+	usageService       *service.UsageService
+	usageDetailService *service.UsageLogDetailService
+	apiKeyService      *service.APIKeyService
+	adminService       service.AdminService
+	cleanupService     *service.UsageCleanupService
 }
 
 // NewUsageHandler creates a new admin usage handler
 func NewUsageHandler(
 	usageService *service.UsageService,
+	usageDetailService *service.UsageLogDetailService,
 	apiKeyService *service.APIKeyService,
 	adminService service.AdminService,
 	cleanupService *service.UsageCleanupService,
 ) *UsageHandler {
 	return &UsageHandler{
-		usageService:   usageService,
-		apiKeyService:  apiKeyService,
-		adminService:   adminService,
-		cleanupService: cleanupService,
+		usageService:       usageService,
+		usageDetailService: usageDetailService,
+		apiKeyService:      apiKeyService,
+		adminService:       adminService,
+		cleanupService:     cleanupService,
 	}
 }
 
@@ -192,11 +195,44 @@ func (h *UsageHandler) List(c *gin.Context) {
 		return
 	}
 
+	hasDetailByID, err := h.batchHasUsageDetails(c.Request.Context(), records)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
 	out := make([]dto.AdminUsageLog, 0, len(records))
 	for i := range records {
-		out = append(out, *dto.UsageLogFromServiceAdmin(&records[i]))
+		item := dto.UsageLogFromServiceAdmin(&records[i])
+		item.HasDetail = hasDetailByID[records[i].ID]
+		out = append(out, *item)
 	}
 	response.Paginated(c, out, result.Total, page, pageSize)
+}
+
+// Detail handles retrieving raw request/response detail for a usage record.
+// GET /api/v1/admin/usage/:id/detail
+func (h *UsageHandler) Detail(c *gin.Context) {
+	idStr := strings.TrimSpace(c.Param("id"))
+	usageLogID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || usageLogID <= 0 {
+		response.BadRequest(c, "Invalid usage log id")
+		return
+	}
+
+	usageLog, err := h.usageService.GetByID(c.Request.Context(), usageLogID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	detail, err := h.usageDetailService.GetByUsageLog(c.Request.Context(), usageLog)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+
+	response.Success(c, dto.AdminUsageDetailFromService(usageLog, detail))
 }
 
 // Stats handles getting usage statistics with filters
@@ -607,4 +643,12 @@ func (h *UsageHandler) CancelCleanupTask(c *gin.Context) {
 	}
 	logger.LegacyPrintf("handler.admin.usage", "[UsageCleanup] 清理任务已取消: task=%d operator=%d", taskID, subject.UserID)
 	response.Success(c, gin.H{"id": taskID, "status": service.UsageCleanupStatusCanceled})
+}
+
+func (h *UsageHandler) batchHasUsageDetails(ctx context.Context, logs []service.UsageLog) (map[int64]bool, error) {
+	result := make(map[int64]bool, len(logs))
+	if h == nil || h.usageDetailService == nil || len(logs) == 0 {
+		return result, nil
+	}
+	return h.usageDetailService.BatchHasDetailsByUsageLogs(ctx, logs)
 }

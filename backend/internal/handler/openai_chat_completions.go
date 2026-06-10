@@ -280,6 +280,14 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 		userAgent := c.GetHeader("User-Agent")
 		clientIP := ip.GetClientIP(c)
+		var requestHeaders http.Header
+		if h.usageDetailCapture.Enabled && c.Request != nil {
+			requestHeaders = c.Request.Header.Clone()
+		}
+		var responseHeaders http.Header
+		if h.usageDetailCapture.Enabled {
+			responseHeaders = c.Writer.Header().Clone()
+		}
 		inboundEndpoint := GetInboundEndpoint(c)
 		upstreamEndpoint := resolveRawCCUpstreamEndpoint(c, account)
 
@@ -294,6 +302,8 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				UpstreamEndpoint:   upstreamEndpoint,
 				UserAgent:          userAgent,
 				IPAddress:          clientIP,
+				RequestHeaders:     requestHeaders,
+				ResponseHeaders:    responseHeaders,
 				APIKeyService:      h.apiKeyService,
 				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
 			}); err != nil {

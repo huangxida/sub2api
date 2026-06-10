@@ -98,7 +98,7 @@ func TestNormalizeResponsesBodyServiceTier(t *testing.T) {
 	require.False(t, gjson.GetBytes(body, "service_tier").Exists())
 }
 
-func TestForwardAsChatCompletions_UnknownModelDoesNotUseDefaultMappedModel(t *testing.T) {
+func TestForwardAsChatCompletions_UnknownModelUsesUnknownFallbackNotDefaultMappedModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	rec := httptest.NewRecorder()
@@ -132,7 +132,7 @@ func TestForwardAsChatCompletions_UnknownModelDoesNotUseDefaultMappedModel(t *te
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-5.4")
 	require.Error(t, err)
 	require.Nil(t, result)
-	require.Equal(t, "gpt6", gjson.GetBytes(upstream.lastBody, "model").String())
+	require.Equal(t, "gpt-5.5", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.NotEqual(t, "gpt-5.4", gjson.GetBytes(upstream.lastBody, "model").String())
 	require.Equal(t, http.StatusBadRequest, rec.Code)
 }

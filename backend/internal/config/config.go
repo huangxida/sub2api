@@ -790,6 +790,8 @@ type GatewayConfig struct {
 
 	// UsageRecord: 使用量记录异步队列配置（有界队列 + 固定 worker）
 	UsageRecord GatewayUsageRecordConfig `mapstructure:"usage_record"`
+	// UsageDetailCapture: 管理端 usage 原始请求/响应详情采集配置
+	UsageDetailCapture GatewayUsageDetailCaptureConfig `mapstructure:"usage_detail_capture"`
 
 	// UserGroupRateCacheTTLSeconds: 用户分组倍率热路径缓存 TTL（秒）
 	UserGroupRateCacheTTLSeconds int `mapstructure:"user_group_rate_cache_ttl_seconds"`
@@ -1000,6 +1002,25 @@ type GatewayUsageRecordConfig struct {
 	AutoScaleCheckIntervalSeconds int `mapstructure:"auto_scale_check_interval_seconds"`
 	// AutoScaleCooldownSeconds: 自动扩缩容冷却时间（秒）
 	AutoScaleCooldownSeconds int `mapstructure:"auto_scale_cooldown_seconds"`
+}
+
+// GatewayUsageDetailCaptureConfig 管理端 usage 原始详情采集配置。
+// 这些限制只作用于新增的详情采集，不影响正常转发和计费逻辑。
+type GatewayUsageDetailCaptureConfig struct {
+	// Enabled 是否启用详情采集
+	Enabled bool `mapstructure:"enabled"`
+	// MaxRequestBytes 单次请求最多保留的原始请求体字节数，0 表示不限制
+	MaxRequestBytes int64 `mapstructure:"max_request_bytes"`
+	// MaxResponseBytes 单次请求最多保留的原始响应体总字节数，0 表示不限制
+	MaxResponseBytes int64 `mapstructure:"max_response_bytes"`
+	// MaxWSResponseFrames ws_v2 最多保留的响应帧数量，0 表示不限制
+	MaxWSResponseFrames int `mapstructure:"max_ws_response_frames"`
+}
+
+// SoraModelFiltersConfig Sora 模型过滤配置
+type SoraModelFiltersConfig struct {
+	// HidePromptEnhance 是否隐藏 prompt-enhance 模型
+	HidePromptEnhance bool `mapstructure:"hide_prompt_enhance"`
 }
 
 // TLSFingerprintConfig TLS指纹伪装配置
@@ -1934,6 +1955,10 @@ func setDefaults() {
 	viper.SetDefault("gateway.usage_record.auto_scale_down_step", 16)
 	viper.SetDefault("gateway.usage_record.auto_scale_check_interval_seconds", 3)
 	viper.SetDefault("gateway.usage_record.auto_scale_cooldown_seconds", 10)
+	viper.SetDefault("gateway.usage_detail_capture.enabled", true)
+	viper.SetDefault("gateway.usage_detail_capture.max_request_bytes", 0)
+	viper.SetDefault("gateway.usage_detail_capture.max_response_bytes", 0)
+	viper.SetDefault("gateway.usage_detail_capture.max_ws_response_frames", 0)
 	viper.SetDefault("gateway.user_group_rate_cache_ttl_seconds", 30)
 	viper.SetDefault("gateway.models_list_cache_ttl_seconds", 15)
 	// TLS指纹伪装配置（默认关闭，需要账号级别单独启用）
@@ -2724,6 +2749,17 @@ func (c *Config) Validate() error {
 		}
 		if c.Gateway.UsageRecord.AutoScaleCooldownSeconds < 0 {
 			return fmt.Errorf("gateway.usage_record.auto_scale_cooldown_seconds must be non-negative")
+		}
+	}
+	if c.Gateway.UsageDetailCapture.Enabled {
+		if c.Gateway.UsageDetailCapture.MaxRequestBytes < 0 {
+			return fmt.Errorf("gateway.usage_detail_capture.max_request_bytes must be non-negative when enabled")
+		}
+		if c.Gateway.UsageDetailCapture.MaxResponseBytes < 0 {
+			return fmt.Errorf("gateway.usage_detail_capture.max_response_bytes must be non-negative when enabled")
+		}
+		if c.Gateway.UsageDetailCapture.MaxWSResponseFrames < 0 {
+			return fmt.Errorf("gateway.usage_detail_capture.max_ws_response_frames must be non-negative when enabled")
 		}
 	}
 	if c.Gateway.UserGroupRateCacheTTLSeconds <= 0 {

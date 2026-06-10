@@ -1,0 +1,158 @@
+name: Build & Deploy sub2api to los3
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: deploy-sub2api
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  HOST: los3
+  IMAGE: xidahuang/sub2api
+  GHCR_IMAGE: ghcr.io/huangxida/sub2api
+  REMOTE_COMPOSE_DIR: /root/sub2api
+  IMAGE_VERSION: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Login to GHCR
+        shell: bash
+        run: |
+          echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build and push image
+        shell: bash
+        run: |
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg VERSION="${IMAGE_VERSION}" \
+            --build-arg COMMIT="${SHORT_SHA}" \
+            --build-arg DATE="${BUILD_DATE}" \
+            --build-arg GOPROXY="https://goproxy.cn,direct" \
+            --build-arg GOSUMDB="sum.golang.google.cn" \
+            -t "$GHCR_IMAGE:latest" \
+            -t "$GHCR_IMAGE:${IMAGE_VERSION}" \
+            --push \
+            .
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          install -m 600 /dev/null ~/.ssh/deploy_prod
+          cat > ~/.ssh/deploy_prod <<'KEY'
+          ${{ secrets.DEPLOY_SSH_KEY }}
+          KEY
+          chmod 600 ~/.ssh/deploy_prod
+          cat > ~/.ssh/config <<'SSHCONF'
+          Host los3
+              HostName 47.88.27.81
+              Port 46222
+              User root
+              IdentityFile ~/.ssh/deploy_prod
+              IdentitiesOnly yes
+              ServerAliveInterval 60
+              StrictHostKeyChecking accept-new
+              UserKnownHostsFile ~/.ssh/known_hosts
+              ConnectTimeout 10
+          SSHCONF
+          chmod 600 ~/.ssh/config
+
+      - name: Pull & restart on $HOST
+        shell: bash
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          ssh -o ConnectTimeout=15 "$HOST" \
+            "GHCR_USERNAME='$GHCR_USERNAME' GHCR_TOKEN='$GHCR_TOKEN' GHCR_IMAGE='$GHCR_IMAGE' IMAGE='$IMAGE' IMAGE_VERSION='$IMAGE_VERSION' bash -s" <<'REMOTE'
+          set -euo pipefail
+          cd "/root/sub2api"
+
+          echo "[los3] logging in to GHCR..."
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
+          echo "[los3] pulling image..."
+          docker pull "$GHCR_IMAGE:$IMAGE_VERSION"
+          docker tag "$GHCR_IMAGE:$IMAGE_VERSION" "$IMAGE:latest"
+          docker tag "$GHCR_IMAGE:$IMAGE_VERSION" "$IMAGE:$IMAGE_VERSION"
+
+          echo "[los3] compose up -d --no-build..."
+          docker compose up -d --no-build
+
+          echo "[los3] waiting for sub2api health..."
+          for attempt in $(seq 1 30); do
+            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' sub2api 2>/dev/null || echo missing)"
+            if [ "$status" = "healthy" ]; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "sub2api container did not become healthy in time (last status: $status)"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "[los3] pruning dangling..."
+          docker image prune -f
+
+          echo "[los3] status:"
+          docker ps --filter name=sub2api --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+          REMOTE
+
+      - name: Fetch tags for release notes
+        if: success() && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: git fetch --force --tags origin
+
+      - name: Generate release notes
+        if: success() && startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          TARGET_SHA="${GITHUB_SHA}"
+          prev_tag="$(git describe --tags --abbrev=0 "${TAG_NAME}^" 2>/dev/null || true)"
+          {
+            echo "## Release ${TAG_NAME}"
+            echo
+            echo "Automated source release for tag \`${TAG_NAME}\`."
+            echo
+            if [ -n "$prev_tag" ]; then
+              echo "Changes since \`${prev_tag}\`:"
+              echo
+              git log "${prev_tag}..${TARGET_SHA}" --pretty=format:"- %s (%h)"
+            else
+              echo "Initial tagged release in this repository."
+            fi
+          } > release_notes.md
+
+      - name: Create GitHub Release
+        if: success() && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ github.ref_name }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: true

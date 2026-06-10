@@ -451,14 +451,14 @@ func TestUsageRecordWorkerPool_Execute_PanicAndTimeout(t *testing.T) {
 	require.NotPanics(t, func() {
 		pool.execute(func(ctx context.Context) {
 			panic("boom")
-		})
+		}, false)
 	})
 
 	done := make(chan struct{})
 	pool.execute(func(ctx context.Context) {
 		<-ctx.Done()
 		close(done)
-	})
+	}, false)
 	select {
 	case <-done:
 	case <-time.After(time.Second):

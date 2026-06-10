@@ -138,6 +138,7 @@ func newOpenAIRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo U
 		nil,
 		usageRepo,
 		nil,
+		nil,
 		userRepo,
 		subRepo,
 		rateRepo,
@@ -1039,6 +1040,8 @@ func TestOpenAIGatewayServiceRecordUsage_UsesRequestedModelAndUpstreamModelMetad
 	require.Equal(t, "gpt-5.1", usageRepo.lastLog.RequestedModel)
 	require.NotNil(t, usageRepo.lastLog.UpstreamModel)
 	require.Equal(t, "gpt-5.1-codex", *usageRepo.lastLog.UpstreamModel)
+	require.NotNil(t, usageRepo.lastLog.ModelMappingChain)
+	require.Equal(t, "gpt-5.1→gpt-5.1-codex", *usageRepo.lastLog.ModelMappingChain)
 	require.NotNil(t, usageRepo.lastLog.ServiceTier)
 	require.Equal(t, serviceTier, *usageRepo.lastLog.ServiceTier)
 	require.NotNil(t, usageRepo.lastLog.ReasoningEffort)
@@ -1052,6 +1055,70 @@ func TestOpenAIGatewayServiceRecordUsage_UsesRequestedModelAndUpstreamModelMetad
 	require.Equal(t, 1, userRepo.deductCalls)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_DerivesUpstreamModelMetadataFromFinalRequestBody(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:        "resp_unknown_fallback_metadata",
+			Model:            "codex-auto-review",
+			FinalRequestBody: []byte(`{"model":"gpt-5.5","input":"ok"}`),
+			Usage: OpenAIUsage{
+				InputTokens:  20,
+				OutputTokens: 10,
+			},
+			Duration: time.Second,
+		},
+		APIKey:  &APIKey{ID: 10},
+		User:    &User{ID: 20},
+		Account: &Account{ID: 30},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, "codex-auto-review", usageRepo.lastLog.Model)
+	require.Equal(t, "codex-auto-review", usageRepo.lastLog.RequestedModel)
+	require.NotNil(t, usageRepo.lastLog.UpstreamModel)
+	require.Equal(t, "gpt-5.5", *usageRepo.lastLog.UpstreamModel)
+	require.NotNil(t, usageRepo.lastLog.ModelMappingChain)
+	require.Equal(t, "codex-auto-review→gpt-5.5", *usageRepo.lastLog.ModelMappingChain)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_DerivesUpstreamModelMetadataFromInputFinalRequestBody(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "resp_unknown_fallback_metadata_input",
+			Model:     "codex-auto-review",
+			Usage: OpenAIUsage{
+				InputTokens:  20,
+				OutputTokens: 10,
+			},
+			Duration: time.Second,
+		},
+		FinalRequestBody: []byte(`{"model":"gpt-5.5","input":"ok"}`),
+		APIKey:           &APIKey{ID: 10},
+		User:             &User{ID: 20},
+		Account:          &Account{ID: 30},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, "codex-auto-review", usageRepo.lastLog.Model)
+	require.Equal(t, "codex-auto-review", usageRepo.lastLog.RequestedModel)
+	require.NotNil(t, usageRepo.lastLog.UpstreamModel)
+	require.Equal(t, "gpt-5.5", *usageRepo.lastLog.UpstreamModel)
+	require.NotNil(t, usageRepo.lastLog.ModelMappingChain)
+	require.Equal(t, "codex-auto-review→gpt-5.5", *usageRepo.lastLog.ModelMappingChain)
+}
+
 func TestOpenAIGatewayServiceRecordUsage_BillsMappedRequestsUsingRequestedModel(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -1059,8 +1126,8 @@ func TestOpenAIGatewayServiceRecordUsage_BillsMappedRequestsUsingRequestedModel(
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
 	usage := OpenAIUsage{InputTokens: 20, OutputTokens: 10}
 
-	// Billing should use the requested model ("gpt-5.1"), not the upstream mapped model ("gpt-5.1-codex").
-	// This ensures pricing is always based on the model the user requested.
+	// Admins can explicitly choose requested-model billing. The default path
+	// bills the upstream model so unknown-model fallback matches what was sent.
 	expectedCost, err := svc.billingService.CalculateCost("gpt-5.1", UsageTokens{
 		InputTokens:  20,
 		OutputTokens: 10,
@@ -1078,6 +1145,11 @@ func TestOpenAIGatewayServiceRecordUsage_BillsMappedRequestsUsingRequestedModel(
 		APIKey:  &APIKey{ID: 10},
 		User:    &User{ID: 20},
 		Account: &Account{ID: 30},
+		ChannelUsageFields: ChannelUsageFields{
+			OriginalModel:      "gpt-5.1",
+			ChannelMappedModel: "gpt-5.1-codex",
+			BillingModelSource: BillingModelSourceRequested,
+		},
 	})
 
 	require.NoError(t, err)
@@ -1237,6 +1309,43 @@ func TestOpenAIGatewayServiceRecordUsage_FallsBackToUpstreamModelWhenPrimaryUnpr
 	require.NotNil(t, usageRepo.lastLog)
 	require.InDelta(t, expectedCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
 	require.True(t, usageRepo.lastLog.ActualCost > 0, "cost must not be zero")
+	require.InDelta(t, expectedCost.ActualCost, userRepo.lastAmount, 1e-12)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_UnknownFallbackBillsUpstreamModel(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+	usage := OpenAIUsage{InputTokens: 20, OutputTokens: 10}
+
+	expectedCost, err := svc.billingService.CalculateCostWithServiceTier("gpt-5.5", UsageTokens{
+		InputTokens:  20,
+		OutputTokens: 10,
+	}, 1.1, "priority")
+	require.NoError(t, err)
+
+	err = svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:     "resp_unknown_fallback_upstream_billing",
+			Model:         "gpt-5.14",
+			UpstreamModel: "gpt-5.5",
+			ServiceTier:   strPtr("priority"),
+			Usage:         usage,
+			Duration:      time.Second,
+		},
+		APIKey:  &APIKey{ID: 10},
+		User:    &User{ID: 20},
+		Account: &Account{ID: 30},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, "gpt-5.14", usageRepo.lastLog.Model)
+	require.Equal(t, "gpt-5.14", usageRepo.lastLog.RequestedModel)
+	require.NotNil(t, usageRepo.lastLog.UpstreamModel)
+	require.Equal(t, "gpt-5.5", *usageRepo.lastLog.UpstreamModel)
+	require.InDelta(t, expectedCost.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
 	require.InDelta(t, expectedCost.ActualCost, userRepo.lastAmount, 1e-12)
 }
 

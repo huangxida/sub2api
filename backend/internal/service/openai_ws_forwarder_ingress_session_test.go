@@ -1479,7 +1479,7 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StoreDisabledPre
 	require.Equal(t, "resp_stale_external", gjson.Get(requestToJSONString(captureConn.writes[1]), "previous_response_id").String(), "function_call_output 场景不应预改写 previous_response_id")
 }
 
-func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StoreDisabledFunctionCallOutputAutoAttachPreviousResponseID(t *testing.T) {
+func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StoreDisabledInterruptedFunctionCallOutputWithoutPreviousResponseIDStaysFullCreate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	cfg := &config.Config{}
@@ -1499,8 +1499,8 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StoreDisabledFun
 
 	captureConn := &openAIWSCaptureConn{
 		events: [][]byte{
-			[]byte(`{"type":"response.completed","response":{"id":"resp_auto_prev_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
-			[]byte(`{"type":"response.completed","response":{"id":"resp_auto_prev_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_interrupt_followup_1","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
+			[]byte(`{"type":"response.completed","response":{"id":"resp_interrupt_followup_2","model":"gpt-5.1","usage":{"input_tokens":1,"output_tokens":1}}}`),
 		},
 	}
 	captureDialer := &openAIWSCaptureDialer{conn: captureConn}
@@ -1592,11 +1592,11 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StoreDisabledFun
 
 	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"store":false,"input":[{"type":"input_text","text":"hello"}]}`)
 	firstTurn := readMessage()
-	require.Equal(t, "resp_auto_prev_1", gjson.GetBytes(firstTurn, "response.id").String())
+	require.Equal(t, "resp_interrupt_followup_1", gjson.GetBytes(firstTurn, "response.id").String())
 
-	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"store":false,"input":[{"type":"function_call_output","call_id":"call_auto_1","output":"ok"}]}`)
+	writeMessage(`{"type":"response.create","model":"gpt-5.1","stream":false,"store":false,"input":[{"type":"function_call_output","call_id":"call_auto_1","output":"Wall time: 0.1 seconds\naborted by user"},{"type":"input_text","text":"<turn_aborted>Tool execution interrupted by user.</turn_aborted>"},{"type":"input_text","text":"follow up"}]}`)
 	secondTurn := readMessage()
-	require.Equal(t, "resp_auto_prev_2", gjson.GetBytes(secondTurn, "response.id").String())
+	require.Equal(t, "resp_interrupt_followup_2", gjson.GetBytes(secondTurn, "response.id").String())
 
 	require.NoError(t, clientConn.Close(coderws.StatusNormalClosure, "done"))
 	select {
@@ -1608,7 +1608,10 @@ func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StoreDisabledFun
 
 	require.Equal(t, 1, captureDialer.DialCount())
 	require.Len(t, captureConn.writes, 2)
-	require.Equal(t, "resp_auto_prev_1", gjson.Get(requestToJSONString(captureConn.writes[1]), "previous_response_id").String(), "function_call_output 缺失 previous_response_id 时应回填上一轮响应 ID")
+	secondWrite := requestToJSONString(captureConn.writes[1])
+	require.False(t, gjson.Get(secondWrite, "previous_response_id").Exists(), "中断后的 follow-up full create 不应自动补齐 previous_response_id")
+	require.Contains(t, gjson.Get(secondWrite, "input.0.output").String(), "aborted by user", "应保留客户端构造的 aborted tool output")
+	require.Contains(t, gjson.Get(secondWrite, "input.1.text").String(), "<turn_aborted>", "应保留中断标记，让后续请求继续走 full create")
 }
 
 func TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_StoreDisabledToolSearchOutputAutoAttachesPreviousResponseID(t *testing.T) {

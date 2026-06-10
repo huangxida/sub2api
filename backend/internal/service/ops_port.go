@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 )
 
 type OpsRepository interface {
@@ -24,6 +26,7 @@ type OpsRepository interface {
 	GetWindowStats(ctx context.Context, filter *OpsDashboardFilter) (*OpsWindowStats, error)
 	// Lightweight realtime traffic summary (for the Ops dashboard header card).
 	GetRealtimeTrafficSummary(ctx context.Context, filter *OpsDashboardFilter) (*OpsRealtimeTrafficSummary, error)
+	GetInputCacheSummary(ctx context.Context, filter *OpsDashboardFilter) (*usagestats.InputCacheSummary, error)
 
 	GetDashboardOverview(ctx context.Context, filter *OpsDashboardFilter) (*OpsDashboardOverview, error)
 	GetThroughputTrend(ctx context.Context, filter *OpsDashboardFilter, bucketSeconds int) (*OpsThroughputTrendResponse, error)

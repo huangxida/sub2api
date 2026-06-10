@@ -1,15 +1,25 @@
 name: CI
 
 on:
-  push:
   pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  backend-checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -20,7 +30,13 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.26.4'
+          case "$(go version)" in
+            *"go1.26.4"*) ;;
+            *)
+              echo "unexpected Go version: $(go version)"
+              exit 1
+              ;;
+          esac
       - name: Unit tests
         working-directory: backend
         run: make test-unit
@@ -60,7 +76,13 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Verify Go version
         run: |
-          go version | grep -q 'go1.26.4'
+          case "$(go version)" in
+            *"go1.26.4"*) ;;
+            *)
+              echo "unexpected Go version: $(go version)"
+              exit 1
+              ;;
+          esac
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:

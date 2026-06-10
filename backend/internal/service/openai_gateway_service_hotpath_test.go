@@ -596,10 +596,11 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 			wantValue: "xhigh",
 		},
 		{
-			name:    "minimal 归一化为空",
-			body:    []byte(`{"reasoning":{"effort":"minimal"}}`),
-			model:   "gpt-5-high",
-			wantNil: true,
+			name:      "minimal 归一化为 none",
+			body:      []byte(`{"reasoning":{"effort":"minimal"}}`),
+			model:     "gpt-5-high",
+			wantNil:   false,
+			wantValue: "none",
 		},
 		{
 			name:      "缺失字段时从模型后缀推导",
@@ -613,6 +614,13 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 			body:    []byte(`{"input":"hi"}`),
 			model:   "gpt-5-unknown",
 			wantNil: true,
+		},
+		{
+			name:      "unknown alias suffix derives effort",
+			body:      []byte(`{"input":"hi"}`),
+			model:     "codex-auto-review-low",
+			wantNil:   false,
+			wantValue: "low",
 		},
 	}
 
@@ -629,7 +637,19 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 	}
 }
 
-func TestGetOpenAIRequestBodyMap_ParseError(t *testing.T) {
+func TestNormalizeOpenAIReasoningEffortInBody(t *testing.T) {
+	body, changed, err := normalizeOpenAIReasoningEffortInBody([]byte(`{"reasoning":{"effort":"minimal"}}`))
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "none", gjson.GetBytes(body, "reasoning.effort").String())
+
+	body, changed, err = normalizeOpenAIReasoningEffortInBody([]byte(`{"reasoning_effort":"x-high"}`))
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, "xhigh", gjson.GetBytes(body, "reasoning_effort").String())
+}
+
+func TestGetOpenAIRequestBodyMap_ParseErrorWithoutCache(t *testing.T) {
 	_, err := getOpenAIRequestBodyMap(nil, []byte(`{invalid-json`))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "parse request")

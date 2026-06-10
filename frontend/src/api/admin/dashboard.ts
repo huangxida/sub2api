@@ -12,6 +12,7 @@ import type {
   ApiKeyUsageTrendPoint,
   UserUsageTrendPoint,
   UserSpendingRankingResponse,
+  InputCacheMetrics,
   UserBreakdownItem,
   UsageRequestType
 } from '@/types'
@@ -142,6 +143,7 @@ export interface DashboardSnapshotV2Response {
   end_date: string
   granularity: string
   stats?: DashboardSnapshotV2Stats
+  input_cache_metrics?: InputCacheMetrics
   trend?: TrendDataPoint[]
   models?: ModelStat[]
   groups?: GroupStat[]
