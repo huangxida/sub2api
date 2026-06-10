@@ -1,4 +1,4 @@
-name: Build & Deploy sub2api to los3
+name: Build & Deploy sub2api to ca1
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ permissions:
   packages: write
 
 env:
-  HOST: los3
+  HOST: ca1
   IMAGE: xidahuang/sub2api
   GHCR_IMAGE: ghcr.io/huangxida/sub2api
   REMOTE_COMPOSE_DIR: /root/sub2api
@@ -64,9 +64,9 @@ jobs:
           KEY
           chmod 600 ~/.ssh/deploy_prod
           cat > ~/.ssh/config <<'SSHCONF'
-          Host los3
-              HostName 47.88.27.81
-              Port 46222
+          Host ca1
+              HostName 107.140.5.5
+              Port 55222
               User root
               IdentityFile ~/.ssh/deploy_prod
               IdentitiesOnly yes
@@ -88,18 +88,18 @@ jobs:
           set -euo pipefail
           cd "/root/sub2api"
 
-          echo "[los3] logging in to GHCR..."
+          echo "[ca1] logging in to GHCR..."
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
 
-          echo "[los3] pulling image..."
+          echo "[ca1] pulling image..."
           docker pull "$GHCR_IMAGE:$IMAGE_VERSION"
           docker tag "$GHCR_IMAGE:$IMAGE_VERSION" "$IMAGE:latest"
           docker tag "$GHCR_IMAGE:$IMAGE_VERSION" "$IMAGE:$IMAGE_VERSION"
 
-          echo "[los3] compose up -d --no-build..."
+          echo "[ca1] compose up -d --no-build..."
           docker compose up -d --no-build
 
-          echo "[los3] waiting for sub2api health..."
+          echo "[ca1] waiting for sub2api health..."
           for attempt in $(seq 1 30); do
             status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' sub2api 2>/dev/null || echo missing)"
             if [ "$status" = "healthy" ]; then
@@ -112,10 +112,10 @@ jobs:
             sleep 5
           done
 
-          echo "[los3] pruning dangling..."
+          echo "[ca1] pruning dangling..."
           docker image prune -f
 
-          echo "[los3] status:"
+          echo "[ca1] status:"
           docker ps --filter name=sub2api --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
           REMOTE
 
