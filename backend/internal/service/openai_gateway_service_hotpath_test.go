@@ -603,6 +603,13 @@ func TestExtractOpenAIReasoningEffortFromBody(t *testing.T) {
 			wantValue: "none",
 		},
 		{
+			name:      "DeepSeek max 归一化为 xhigh",
+			body:      []byte(`{"reasoning_effort":"max"}`),
+			model:     "deepseek-v4-pro",
+			wantNil:   false,
+			wantValue: "xhigh",
+		},
+		{
 			name:      "缺失字段时从模型后缀推导",
 			body:      []byte(`{"input":"hi"}`),
 			model:     "gpt-5-high",
