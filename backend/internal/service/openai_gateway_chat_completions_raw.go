@@ -89,6 +89,8 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if reasoningEffort == nil && normalization.DerivedReasoningEffort != "" {
 		reasoningEffort = &normalization.DerivedReasoningEffort
 	}
+	// 国产模型默认 effort 补充：需要 mappedModel 判定，推迟到 billingModel 算出之后。
+	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, billingModel)
 
 	// 3. Rewrite model in body (no protocol conversion)
 	upstreamBody := body
