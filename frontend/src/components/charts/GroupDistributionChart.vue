@@ -225,9 +225,10 @@ const doughnutOptions = computed(() => ({
   }
 }))
 
-const toFiniteNumber = (value: number | null | undefined): number => (
-  typeof value === 'number' && Number.isFinite(value) ? value : 0
-)
+const toFiniteNumber = (value: unknown): number => {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : 0
+}
 
 const getGroupMetricValue = (group: GroupStat): number => (
   props.metric === 'actual_cost'

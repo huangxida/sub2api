@@ -606,8 +606,9 @@ const formatTokens = (value: number | undefined): string => {
   return value.toLocaleString()
 }
 
-const formatNumber = (value: number): string => {
-  return value.toLocaleString()
+const toFiniteNumber = (value: unknown): number => {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : 0
 }
 
 const formatPercentage = (value: number | null | undefined): string => {
@@ -631,9 +632,9 @@ const computeCacheHitRate = (
   return Math.round((totalCacheTokens / totalTokens) * 10000) / 100
 }
 
-const toFiniteNumber = (value: number | null | undefined): number => (
-  typeof value === 'number' && Number.isFinite(value) ? value : 0
-)
+const formatNumber = (value: number | null | undefined): string => {
+  return toFiniteNumber(value).toLocaleString()
+}
 
 const formatCost = (value: number | null | undefined): string => {
   const safeValue = toFiniteNumber(value)
