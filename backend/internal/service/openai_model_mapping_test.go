@@ -444,6 +444,13 @@ func TestNormalizeOpenAIModelForUpstreamWithUnknownFallback(t *testing.T) {
 			settings:  OpenAIUnknownModelFallbackSettings{Scope: OpenAIUnknownModelFallbackScopeOAuth},
 			wantModel: "codex-auto-review",
 		},
+		{
+			name:      "grok oauth preserves grok model despite openai fallback settings",
+			account:   &Account{Type: AccountTypeOAuth, Platform: PlatformGrok},
+			model:     "grok-4.3",
+			settings:  defaults,
+			wantModel: "grok-4.3",
+		},
 	}
 
 	for _, tt := range tests {
