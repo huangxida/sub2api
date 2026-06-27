@@ -923,6 +923,10 @@ func normalizeOpenAIModelForUpstreamWithUnknownFallback(
 		trimmed = "gpt-5.4"
 	}
 
+	if account != nil && account.Platform != "" && account.Platform != PlatformOpenAI {
+		return openAIModelNormalizationResult{Model: trimmed}
+	}
+
 	if account == nil || account.Type == AccountTypeOAuth {
 		if mapped, ok := normalizeKnownCodexModel(trimmed); ok {
 			return openAIModelNormalizationResult{Model: mapped, Known: true}
